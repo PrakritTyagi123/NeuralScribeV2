@@ -1,0 +1,124 @@
+# ==========================================================
+# PYTHON
+# ==========================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+*.so
+*.pyd
+*.dll
+
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# MyPy / type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff / lint
+.ruff_cache/
+
+# ==========================================================
+# DATA (VERY IMPORTANT)
+# ==========================================================
+
+# Raw datasets
+data/raw/
+
+# Cached processed datasets
+data/cache/
+
+# Synthetic generation temp files
+data/temp/
+
+# Large tensor files
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Model exports
+backend/models/
+!backend/models/index.json
+
+# ==========================================================
+# LOGS
+# ==========================================================
+
+*.log
+logs/
+backend/logs/
+
+# ==========================================================
+# SYSTEM FILES
+# ==========================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================================
+# IDE / EDITOR
+# ==========================================================
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==========================================================
+# FRONTEND
+# ==========================================================
+
+# Node (if ever added later)
+node_modules/
+dist/
+build/
+
+# Local environment files
+.env
+.env.*
+frontend/.env
+
+# ==========================================================
+# OS / GPU / TEMP
+# ==========================================================
+
+*.tmp
+*.temp
+*.bak
+
+# NVIDIA profiling outputs
+*.nvvp
+*.nsys-rep
+
+# ==========================================================
+# TEST OUTPUTS
+# ==========================================================
+
+coverage.xml
+*.coverage
