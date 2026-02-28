@@ -1,7 +1,9 @@
 """
-System API routes — GPU, system stats, dashboard overview.
+System API routes — GPU, system stats, dashboard overview, shutdown.
 """
 
+import os
+import signal
 from fastapi import APIRouter, Request
 
 router = APIRouter()
@@ -44,3 +46,16 @@ async def torch_info(request: Request):
 async def class_registry(request: Request):
     """Return the full class registry."""
     return _services(request).dataset_service.registry.to_dict()
+
+
+@router.post("/shutdown")
+async def shutdown(request: Request):
+    """Gracefully shut down the server."""
+    # Stop training if running
+    ts = _services(request).training_service
+    if ts.is_training:
+        ts.stop()
+
+    # Kill the process
+    os.kill(os.getpid(), signal.SIGTERM)
+    return {"status": "shutting down"}

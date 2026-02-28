@@ -37,7 +37,8 @@ def main():
         port=args.port,
         reload=args.reload,
         workers=args.workers,
-        log_level="info",
+        log_level="warning",
+        access_log=False,
         ws_ping_interval=30,
         ws_ping_timeout=10,
     )

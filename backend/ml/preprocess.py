@@ -203,6 +203,9 @@ def preprocess_canvas_data(
     if img_array.max() <= 1.0:
         img_array = img_array * 255.0
 
+    # Canvas sends top-down; flip vertically to match EMNIST training orientation
+    img_array = np.flipud(img_array)
+
     img_array = bbox_crop_pad(img_array)
     img_array = center_of_mass_align(img_array, target_size)
     img_array = smooth_image(img_array, sigma=0.5)

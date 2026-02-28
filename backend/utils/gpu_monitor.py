@@ -4,13 +4,11 @@ Primary: pynvml | Fallback: nvidia-smi subprocess | Graceful: CPU-only mode
 """
 
 import subprocess
-import json
 from typing import Dict, Any, Optional
 from .logging import get_logger
 
 log = get_logger(__name__)
 
-# Try pynvml
 _pynvml_available = False
 try:
     import pynvml
@@ -18,6 +16,7 @@ try:
     _pynvml_available = True
     log.info("GPU monitoring: pynvml initialized")
 except Exception:
+    pynvml = None
     log.info("pynvml not available, trying nvidia-smi fallback")
 
 

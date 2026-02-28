@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuralScribe v2</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header id="header">
+            <div class="header-left">
+                <span class="logo">NeuralScribe <span class="version">v2</span></span>
+            </div>
+            <div class="header-right">
+                <span id="gpu-badge" class="badge">GPU: --</span>
+                <span id="device-badge" class="badge">CPU</span>
+                <button id="quit-btn" class="btn" style="margin-left:8px;font-size:11px;padding:2px 10px;" title="Shutdown server">✕ Quit</button>
+            </div>
+        </header>
+
+        <!-- Layout: sidebar + main -->
+        <div id="layout">
+            <!-- Sidebar -->
+            <nav id="sidebar">
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <span class="nav-icon">◫</span> Dashboard
+                </a>
+                <a href="#" class="nav-item" data-view="dataPrep">
+                    <span class="nav-icon">◧</span> Data Prep
+                </a>
+                <a href="#" class="nav-item" data-view="training">
+                    <span class="nav-icon">▦</span> Training
+                </a>
+                <a href="#" class="nav-item" data-view="modelManager">
+                    <span class="nav-icon">◰</span> Models
+                </a>
+                <a href="#" class="nav-item" data-view="inference">
+                    <span class="nav-icon">✎</span> Inference
+                </a>
+                <a href="#" class="nav-item" data-view="explainability">
+                    <span class="nav-icon">◉</span> Explain
+                </a>
+                <a href="#" class="nav-item" data-view="setting">
+                    <span class="nav-icon">⚙</span> Settings
+                </a>
+            </nav>
+
+            <!-- Main workspace -->
+            <main id="main">
+                <!-- Views are injected here by router -->
+            </main>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

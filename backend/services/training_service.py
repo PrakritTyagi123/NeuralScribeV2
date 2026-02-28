@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
 import asyncio
@@ -51,11 +51,19 @@ class TrainingService:
         self._is_paused = False
         self._stop_requested = False
         self._model: Optional[NeuralScribeNet] = None
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._current_epoch = 0
         self._best_val_acc = 0.0
         self._history: List[Dict[str, Any]] = []
         self._training_state: Dict[str, Any] = {}
+
+        # Device detection
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            self._device = torch.device("cuda")
+            log.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
+        else:
+            self._device = torch.device("cpu")
+            log.warning("CUDA not available — training will use CPU (slow!)")
 
     # ── Properties ──
 
@@ -183,7 +191,7 @@ class TrainingService:
 
         # Mixed precision
         use_amp = cfg.get("mixed_precision.enabled", True) and device.type == "cuda"
-        scaler = GradScaler(enabled=use_amp)
+        scaler = GradScaler('cuda', enabled=use_amp)
 
         # Mixup
         mixup_alpha = cfg.get("regularization.mixup_alpha", 0.2)
@@ -268,7 +276,7 @@ class TrainingService:
 
                 optimizer.zero_grad(set_to_none=True)
 
-                with autocast(enabled=use_amp):
+                with autocast('cuda', enabled=use_amp):
                     logits = model(images)
                     loss = mixup_criterion(criterion, logits, ya, yb, lam) if do_mixup else criterion(logits, targets)
 
@@ -368,7 +376,7 @@ class TrainingService:
             for images, targets in val_loader:
                 images = images.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
-                with autocast(enabled=use_amp):
+                with autocast('cuda', enabled=use_amp):
                     logits = model(images)
                     loss = F.cross_entropy(logits, targets)
                 loss_sum += loss.item() * images.size(0)
