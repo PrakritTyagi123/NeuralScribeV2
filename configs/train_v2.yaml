@@ -1,0 +1,72 @@
+# NeuralScribe v2 — Training Config
+
+model:
+  stem_channels: 32
+  block_channels: [64, 128, 256, 320]
+  se_reduction: 16
+  dropout: 0.4
+  drop_path_rate: 0.1
+  num_classes: 120            # must match class_registry
+
+training:
+  epochs: 100
+  batch_size: 256
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+
+optimizer:
+  type: "adamw"
+  lr: 0.003
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+
+scheduler:
+  type: "cosine_warm_restarts"
+  T_0: 10
+  T_mult: 2
+  eta_min: 0.00001
+  warmup_epochs: 3
+  warmup_start_lr: 0.0001
+
+loss:
+  type: "combined"
+  label_smoothing: 0.08
+  focal_gamma: 1.5
+  focal_weight: 0.3           # weight of focal component in combined loss
+
+regularization:
+  mixup_alpha: 0.2
+  mixup_probability: 0.5
+  cutmix_alpha: 0.0           # disabled by default
+  stochastic_depth: true
+
+augmentation:
+  online: true
+  rotation_range: [-10, 10]
+  translation_range: [-1, 1]
+  scale_range: [0.95, 1.05]
+
+mixed_precision:
+  enabled: true
+
+checkpointing:
+  save_best: true
+  save_interval: 10           # save every N epochs
+  max_checkpoints: 5          # keep at most N periodic checkpoints
+  models_dir: "backend/models"
+  metadata: true
+
+validation:
+  per_class_metrics: true
+  confusion_matrix: true
+  top_confusions: 10
+
+logging:
+  ws_throttle_seconds: 1.0    # min interval between WS batch updates
+  log_every_n_batches: 50
+
+dataset:
+  cache_path: "data/cache/cached_dataset_v2.pt"
+
+class_registry: "configs/class_registry.yaml"

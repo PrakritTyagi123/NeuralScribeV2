@@ -1,0 +1,28 @@
+# Core
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+pydantic>=2.5.0
+
+# ML
+torch>=2.1.0
+onnx>=1.15.0
+onnxruntime>=1.16.0
+
+# Data & preprocessing
+numpy>=1.24.0
+Pillow>=10.0.0
+scipy>=1.11.0
+
+# GPU monitoring
+pynvml>=11.5.0
+
+# Config
+PyYAML>=6.0.1
+
+# Utilities
+psutil>=5.9.0
+matplotlib>=3.8.0
+
+# GPU support (optional)
+torchvision --index-url https://download.pytorch.org/whl/cu128
