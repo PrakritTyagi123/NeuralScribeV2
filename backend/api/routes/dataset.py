@@ -2,7 +2,7 @@
 Dataset API routes — data preparation, status, config.
 """
 
-from fastapi import APIRouter, Request, BackgroundTasks
+from fastapi import APIRouter, Request, BackgroundTasks, Body
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 
@@ -33,10 +33,13 @@ async def dataset_config(request: Request):
 
 
 @router.post("/config")
-async def update_dataset_config(request: Request, body: Dict[str, Any]):
+async def update_dataset_config(request: Request, body: Dict[str, Any] = Body(...)):
     """Update data preparation config (saved to YAML)."""
+    from ...utils.logging import get_logger
+    log = get_logger(__name__)
+    log.info(f"Updating dataset config: {body}")
     _services(request).dataset_service.update_config(body)
-    return {"status": "updated"}
+    return {"status": "updated", "applied": body}
 
 
 @router.post("/prepare")
