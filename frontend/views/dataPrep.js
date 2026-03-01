@@ -140,8 +140,24 @@ export async function renderDataPrep(container) {
         startBtn.disabled = true;
         cancelBtn.disabled = false;
         Object.values(stageBars).forEach(bar => updateProgressBar(bar, 0, 'Waiting'));
-        appendLog(logConsole, 'Starting dataset preparation...');
+
+        // Send config overrides from form
+        const samplesVal = parseInt(container.querySelector('#prep-samples').value) || 1500;
+        const augVal = parseInt(container.querySelector('#prep-augfactor').value) || 3;
+        const synthVal = container.querySelector('#prep-synthetic').value === 'true';
+
+        appendLog(logConsole, `Starting: synthetic=${synthVal}, samples=${samplesVal}, augment=${augVal}`);
         try {
+            // Update config first
+            await fetch('/api/dataset/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    'synthetic.enabled': synthVal,
+                    'synthetic.samples_per_symbol': samplesVal,
+                    'augmentation.precompute_factor': augVal,
+                }),
+            });
             const res = await fetch('/api/dataset/prepare', { method: 'POST' });
             const data = await res.json();
             appendLog(logConsole, data.message || JSON.stringify(data));

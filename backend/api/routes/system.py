@@ -64,11 +64,18 @@ async def clear_all(request: Request):
     import shutil
     from ...utils.config import PROJECT_ROOT
 
-    # Unload model
     s = _services(request)
+
+    # Unload model
     s.interface_service._model = None
     s.model_service._loaded_model = None
     s.model_service._loaded_model_name = None
+
+    # Reset training state
+    s.training_service._history = []
+    s.training_service._best_val_acc = 0.0
+    s.training_service._current_epoch = 0
+    s.training_service._training_state = {}
 
     deleted = []
 

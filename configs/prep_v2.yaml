@@ -1,22 +1,27 @@
-# NeuralScribe v2 — Data Preparation Config
-
 dataset:
-  emnist_split: "balanced"
-  emnist_root: "data/raw/emnist"
+  emnist_split: balanced
+  emnist_root: data/raw/emnist
   auto_download: true
-
 synthetic:
   enabled: true
-  fonts_dir: "data/fonts"
-  samples_per_symbol: 1500
-  stroke_widths: [1, 2, 3]
-  font_sizes: [18, 20, 22, 24]
+  fonts_dir: data/fonts
+  samples_per_symbol: 5000
+  stroke_widths:
+  - 1
+  - 2
+  - 3
+  font_sizes:
+  - 18
+  - 20
+  - 22
+  - 24
   noise_level: 0.02
-  blur_sigma_range: [0.3, 0.8]
-
+  blur_sigma_range:
+  - 0.3
+  - 0.8
 preprocessing:
   image_size: 28
-  interpolation: "bicubic"
+  interpolation: bicubic
   center_of_mass: true
   orientation_correction: true
   smoothing:
@@ -25,32 +30,38 @@ preprocessing:
   normalize:
     mean: 0.1307
     std: 0.3081
-
 augmentation:
   precompute: true
-  precompute_factor: 3          # number of augmented copies per sample
-  rotation_range: [-12, 12]
-  translation_range: [-2, 2]
-  scale_range: [0.9, 1.1]
-  shear_range: [-5, 5]
+  precompute_factor: 10
+  rotation_range:
+  - -12
+  - 12
+  translation_range:
+  - -2
+  - 2
+  scale_range:
+  - 0.9
+  - 1.1
+  shear_range:
+  - -5
+  - 5
   elastic:
     enabled: true
     alpha: 3.0
     sigma: 0.5
   erosion_dilation:
     enabled: true
-    kernel_range: [2, 3]
+    kernel_range:
+    - 2
+    - 3
     probability: 0.15
-
 cache:
   enabled: true
-  path: "data/cache/cached_dataset_v2.pt"
+  path: data/cache/cached_dataset_v2.pt
   compression: false
-
 split:
   test_ratio: 0.15
-  val_ratio: 0.10
+  val_ratio: 0.1
   stratified: true
   seed: 42
-
-class_registry: "configs/class_registry.yaml"
+class_registry: configs/class_registry.yaml
