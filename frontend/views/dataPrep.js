@@ -155,6 +155,7 @@ export async function renderDataPrep(container) {
                 body: JSON.stringify({
                     'synthetic.enabled': synthVal,
                     'synthetic.samples_per_symbol': samplesVal,
+                    'augmentation.precompute': true,
                     'augmentation.precompute_factor': augVal,
                 }),
             });

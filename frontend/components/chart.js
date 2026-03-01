@@ -45,7 +45,7 @@ export function createChart(defaultWidth = 500, height = 220) {
 
         if (datasets.length === 0 || datasets.every(d => d.data.length === 0)) {
             ctx.fillStyle = '#ccc';
-            ctx.font = '12px Courier New';
+            ctx.font = '13px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText('No data', w / 2, h / 2);
             return;
@@ -70,7 +70,7 @@ export function createChart(defaultWidth = 500, height = 220) {
             ctx.stroke();
             const val = maxVal - (maxVal - minVal) * i / 4;
             ctx.fillStyle = '#999';
-            ctx.font = '10px Courier New';
+            ctx.font = '11px sans-serif';
             ctx.textAlign = 'right';
             ctx.fillText(val.toFixed(3), pad.left - 4, y + 3);
         }
@@ -78,7 +78,7 @@ export function createChart(defaultWidth = 500, height = 220) {
         // X labels
         if (maxLen >= 1) {
             ctx.fillStyle = '#999';
-            ctx.font = '10px Courier New';
+            ctx.font = '11px sans-serif';
             ctx.textAlign = 'center';
             const step = Math.max(1, Math.floor(maxLen / 10));
             for (let i = 0; i < maxLen; i += step) {
@@ -129,7 +129,7 @@ export function createChart(defaultWidth = 500, height = 220) {
         });
 
         // Legend
-        ctx.font = '10px Courier New';
+        ctx.font = '11px sans-serif';
         ctx.textAlign = 'left';
         datasets.forEach((ds, di) => {
             const x = pad.left + 8 + di * 90;
@@ -146,7 +146,7 @@ export function createChart(defaultWidth = 500, height = 220) {
         });
 
         ctx.fillStyle = '#999';
-        ctx.font = '10px Courier New';
+        ctx.font = '11px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('Epoch', pad.left + plotW / 2, h - 2);
     }

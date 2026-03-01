@@ -19,6 +19,7 @@ log = get_logger(__name__)
 
 # Fallback system fonts that typically have good Unicode coverage
 FALLBACK_FONTS = [
+    # Linux
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
@@ -27,6 +28,41 @@ FALLBACK_FONTS = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/opentype/stix/STIXGeneral.otf",
+    # Windows
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/times.ttf",
+    "C:/Windows/Fonts/cour.ttf",
+    "C:/Windows/Fonts/cambria.ttc",
+    "C:/Windows/Fonts/consola.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    # macOS
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/Times.ttc",
+    "/Library/Fonts/Arial.ttf",
+]
+
+# Fonts to auto-download (good Unicode/math coverage, open license)
+AUTO_DOWNLOAD_FONTS = [
+    {
+        "name": "DejaVuSans.ttf",
+        "url": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf",
+    },
+    {
+        "name": "DejaVuSerif.ttf",
+        "url": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSerif.ttf",
+    },
+    {
+        "name": "DejaVuSansMono.ttf",
+        "url": "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSansMono.ttf",
+    },
+    {
+        "name": "Roboto-Regular.ttf",
+        "url": "https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf",
+    },
+    {
+        "name": "Roboto-Bold.ttf",
+        "url": "https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf",
+    },
 ]
 
 
@@ -60,7 +96,7 @@ class SyntheticSymbolGenerator:
         self._load_fonts()
 
     def _load_fonts(self):
-        """Discover available TTF/OTF fonts."""
+        """Discover available TTF/OTF fonts. Auto-downloads if none found."""
         # First check bundled fonts dir
         if self.fonts_dir.exists():
             for f in self.fonts_dir.glob("*.ttf"):
@@ -73,8 +109,25 @@ class SyntheticSymbolGenerator:
             if os.path.exists(fp) and fp not in self._fonts:
                 self._fonts.append(fp)
 
+        # Auto-download if no fonts found
         if not self._fonts:
-            log.warning("No fonts found! Synthetic generation will use PIL default font.")
+            log.info("No fonts found — downloading DejaVu fonts...")
+            self.fonts_dir.mkdir(parents=True, exist_ok=True)
+            import urllib.request
+            for font_info in AUTO_DOWNLOAD_FONTS:
+                dest = self.fonts_dir / font_info["name"]
+                if dest.exists():
+                    self._fonts.append(str(dest))
+                    continue
+                try:
+                    urllib.request.urlretrieve(font_info["url"], str(dest))
+                    self._fonts.append(str(dest))
+                    log.info(f"  Downloaded {font_info['name']}")
+                except Exception as e:
+                    log.warning(f"  Failed to download {font_info['name']}: {e}")
+
+        if not self._fonts:
+            log.warning("No fonts available! Synthetic generation will use PIL default font.")
         else:
             log.info(f"Loaded {len(self._fonts)} fonts for synthetic generation")
 

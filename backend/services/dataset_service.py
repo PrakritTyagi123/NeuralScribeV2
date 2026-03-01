@@ -186,7 +186,10 @@ class DatasetService:
             return {"status": "cancelled"}
 
         # ── Step 5: Augmentation (precompute if enabled) ──
-        if config.get("augmentation.precompute", False):
+        precompute_enabled = config.get("augmentation.precompute", False)
+        precompute_factor = config.get("augmentation.precompute_factor", 3)
+        log.info(f"Augmentation: precompute={precompute_enabled}, factor={precompute_factor}")
+        if precompute_enabled:
             emit({"stage": "augmenting", "processed": 0, "total": total_samples, "message": "Augmenting..."})
             all_images, all_labels = self._precompute_augmentations(
                 all_images, all_labels, config, emit

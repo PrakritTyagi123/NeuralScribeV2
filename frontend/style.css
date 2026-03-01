@@ -12,8 +12,9 @@
     --success: #000000;
     --error: #666666;
     --muted: #888888;
-    --font: "Courier New", "Consolas", monospace;
-    --font-size: 13px;
+    --font: "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "Consolas", "Courier New", monospace;
+    --font-size: 13.5px;
     --radius: 0px;
 }
 
@@ -71,7 +72,7 @@ body {
 .badge {
     padding: 2px 8px;
     border: 1px solid var(--border);
-    font-size: 11px;
+    font-size: 12px;
 }
 
 #layout {
@@ -97,7 +98,7 @@ body {
     padding: 8px 16px;
     text-decoration: none;
     color: var(--fg);
-    font-size: 12px;
+    font-size: 13px;
     border-left: 3px solid transparent;
 }
 
@@ -213,10 +214,11 @@ body {
     background: var(--bg);
     color: var(--fg);
     font-family: var(--font);
-    font-size: 12px;
+    font-size: 13px;
     cursor: pointer;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
+    font-weight: 500;
 }
 
 .btn:hover {
@@ -284,15 +286,15 @@ body {
     padding: 6px 10px;
     text-align: left;
     border: 1px solid var(--border-light);
-    font-size: 12px;
+    font-size: 13px;
 }
 
 .table th {
     background: var(--bg-panel);
-    font-weight: bold;
+    font-weight: 600;
     text-transform: uppercase;
-    font-size: 10px;
-    letter-spacing: 1px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
 }
 
 .table tr:hover {
@@ -306,11 +308,12 @@ body {
 
 .form-group label {
     display: block;
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
     margin-bottom: 4px;
     color: var(--muted);
+    font-weight: 500;
 }
 
 .form-group input,
@@ -319,7 +322,7 @@ body {
     padding: 6px 8px;
     border: 1px solid var(--border);
     font-family: var(--font);
-    font-size: 12px;
+    font-size: 13px;
     background: var(--bg);
 }
 
@@ -335,11 +338,11 @@ body {
     background: #000;
     color: #ccc;
     padding: 8px;
-    font-size: 11px;
+    font-size: 12px;
     min-height: 150px;
     height: 100%;
     overflow-y: auto;
-    font-family: var(--font);
+    font-family: var(--font-mono);
 }
 
 .log-console .log-entry {
@@ -545,7 +548,7 @@ body {
 .mb-8 { margin-bottom: 8px; }
 .mb-16 { margin-bottom: 16px; }
 .text-muted { color: var(--muted); }
-.text-sm { font-size: 11px; }
+.text-sm { font-size: 12px; }
 .text-bold { font-weight: bold; }
 .flex { display: flex; }
 .flex-between { display: flex; justify-content: space-between; align-items: center; }

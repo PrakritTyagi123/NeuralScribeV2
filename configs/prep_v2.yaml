@@ -5,7 +5,7 @@ dataset:
 synthetic:
   enabled: true
   fonts_dir: data/fonts
-  samples_per_symbol: 5000
+  samples_per_symbol: 1500
   stroke_widths:
   - 1
   - 2
@@ -32,7 +32,7 @@ preprocessing:
     std: 0.3081
 augmentation:
   precompute: true
-  precompute_factor: 10
+  precompute_factor: 3
   rotation_range:
   - -12
   - 12
