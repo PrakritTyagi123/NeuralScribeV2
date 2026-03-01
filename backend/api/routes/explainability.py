@@ -27,20 +27,23 @@ class LayerRequest(BaseModel):
 
 @router.post("/full")
 async def full_explain(request: Request, body: ExplainRequest):
-    """
-    Full explainability pass:
-    - Processed input image (base64)
-    - Feature map heatmaps for each layer (base64)
-    - Channel importance scores
-    - Probability evolution through layers
-    - Top-5 predictions
-    """
+    """Full explainability pass with feature maps and probability evolution."""
     svc = _services(request).interface_service
-
     if not svc.model_loaded:
         return {"error": "No model loaded"}
-
     return svc.explain(pixel_data=body.pixels)
+
+
+@router.post("/live")
+async def live_explain(request: Request, body: ExplainRequest):
+    """
+    Lightweight real-time endpoint for NN diagram.
+    Returns per-layer activation stats + top predictions, no base64 images.
+    """
+    svc = _services(request).interface_service
+    if not svc.model_loaded:
+        return {"error": "No model loaded"}
+    return svc.explain_live(pixel_data=body.pixels)
 
 
 @router.post("/layer")

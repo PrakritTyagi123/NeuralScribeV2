@@ -39,7 +39,7 @@ export async function renderInference(container) {
     debugRow.className = 'mt-8';
     debugRow.innerHTML = `
         <div class="text-sm text-muted mb-8">Processed input (what model sees):</div>
-        <img id="debug-preview" style="width:112px;height:112px;image-rendering:pixelated;border:1px solid #ccc;background:#000;" />
+        <img id="debug-preview" style="width:112px;height:112px;image-rendering:pixelated;border:1px solid #ccc;background:#000;transform:scaleX(-1);" />
     `;
     canvasBody.appendChild(debugRow);
 

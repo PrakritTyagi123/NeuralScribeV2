@@ -335,3 +335,131 @@ class InterfaceService:
             "layer": layer_name,
             **self._render_feature_maps(act, max_channels),
         }
+
+    # ── Lightweight live explainability ──
+
+    def explain_live(self, pixel_data: list) -> Dict[str, Any]:
+        """
+        Fast explainability for real-time NN diagram.
+        Returns per-layer activation stats (no base64), top predictions,
+        and per-channel mean activations for node coloring.
+        """
+        if self._model is None:
+            return {"error": "No model loaded"}
+
+        start = time.perf_counter()
+
+        tensor = preprocess_canvas_data(pixel_data)
+        tensor = tensor.to(self._device)
+
+        self._model.eval()
+        with torch.no_grad():
+            logits, activations = self._model.forward_with_intermediates(tensor)
+            probs = F.softmax(logits, dim=-1).squeeze(0)
+
+        # Top-5 predictions
+        top_probs, top_indices = probs.topk(5)
+        predictions = []
+        for i in range(5):
+            cid = int(top_indices[i])
+            predictions.append({
+                "class_id": cid,
+                "display": self._registry.id_to_display(cid),
+                "confidence": round(float(top_probs[i]), 4),
+            })
+
+        # Per-layer activation stats for NN diagram nodes
+        layer_stats = []
+
+        # Add input as first layer
+        input_flat = tensor.squeeze(0).squeeze(0).cpu()  # (28, 28)
+        input_mean = float(input_flat.mean())
+        # Sample 16 patches from the input as node values
+        input_nodes = []
+        step = 28 // 4
+        for r in range(4):
+            for c in range(4):
+                patch = input_flat[r*step:(r+1)*step, c*step:(c+1)*step]
+                input_nodes.append(round(float(patch.mean()), 4))
+        layer_stats.append({
+            "name": "input",
+            "type": "input",
+            "channels": 1,
+            "spatial": [28, 28],
+            "mean_activation": round(input_mean, 4),
+            "node_values": input_nodes,
+        })
+
+        import logging
+        log = logging.getLogger(__name__)
+        log.info(f"explain_live: activation keys = {list(activations.keys())}")
+
+        for layer_name, act in activations.items():
+            act_cpu = act.squeeze(0).cpu()
+            log.info(f"  {layer_name}: shape={act_cpu.shape}, dim={act_cpu.dim()}")
+
+            if act_cpu.dim() == 3:  # Conv: (C, H, W)
+                # Per-channel mean activation (for individual nodes)
+                channel_means = act_cpu.mean(dim=(1, 2)).numpy()
+                # Normalize to 0-1 range
+                cmin, cmax = channel_means.min(), channel_means.max()
+                if cmax - cmin > 1e-8:
+                    channel_norms = ((channel_means - cmin) / (cmax - cmin)).tolist()
+                else:
+                    channel_norms = [0.0] * len(channel_means)
+
+                layer_stats.append({
+                    "name": layer_name,
+                    "type": "conv",
+                    "channels": int(act_cpu.shape[0]),
+                    "spatial": [int(act_cpu.shape[1]), int(act_cpu.shape[2])],
+                    "mean_activation": round(float(act_cpu.mean()), 4),
+                    "max_activation": round(float(act_cpu.max()), 4),
+                    "node_values": channel_norms[:32],  # Top 32 for diagram
+                })
+            elif act_cpu.dim() == 1:  # FC: (N,)
+                vals = act_cpu.numpy()
+                vmin, vmax = vals.min(), vals.max()
+                if vmax - vmin > 1e-8:
+                    norms = ((vals - vmin) / (vmax - vmin)).tolist()
+                else:
+                    norms = [0.0] * len(vals)
+                layer_stats.append({
+                    "name": layer_name,
+                    "type": "fc",
+                    "channels": int(len(vals)),
+                    "mean_activation": round(float(vals.mean()), 4),
+                    "node_values": norms[:32],
+                })
+            elif act_cpu.dim() == 2:  # Batch wasn't squeezed or 2D FC
+                vals = act_cpu[0].numpy() if act_cpu.shape[0] == 1 else act_cpu.flatten().numpy()
+                vmin, vmax = vals.min(), vals.max()
+                if vmax - vmin > 1e-8:
+                    norms = ((vals - vmin) / (vmax - vmin)).tolist()
+                else:
+                    norms = [0.0] * len(vals)
+                layer_stats.append({
+                    "name": layer_name,
+                    "type": "fc",
+                    "channels": int(len(vals)),
+                    "mean_activation": round(float(vals.mean()), 4),
+                    "node_values": norms[:32],
+                })
+
+        # Output layer probabilities as node values
+        output_probs = probs.cpu().numpy()
+        layer_stats.append({
+            "name": "output",
+            "type": "output",
+            "channels": int(len(output_probs)),
+            "node_values": output_probs.tolist(),
+            "winner": int(top_indices[0]),
+        })
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+        return {
+            "predictions": predictions,
+            "layers": layer_stats,
+            "inference_time_ms": round(elapsed_ms, 2),
+        }

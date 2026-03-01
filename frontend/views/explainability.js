@@ -1,181 +1,549 @@
-/** Explainability view — live neural network visualization. */
+/**
+ * Explainability view — Network flow + feature maps at top,
+ * live NN diagram filling remaining space below.
+ * Real-time: predicts as you draw.
+ */
 import { createCanvas } from '../components/canvas.js';
-import { createNetworkFlow } from '../components/networkFlow.js';
-import { createFeatureMapViewer } from '../components/featureMapViewer.js';
-import { createProbEvolution } from '../components/probEvolution.js';
 import { createConfidenceBars, updateConfidenceBars } from '../components/confidenceBars.js';
 
-let cachedPixels = null;
+let animFrame = null;
 
 export async function renderExplainability(container) {
-    container.innerHTML = `<div class="view-title">Explainability</div>`;
+    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+    container.innerHTML = '';
+    container.className = 'view-fit';
 
     // Check model
+    let ready = false;
     try {
-        const res = await fetch('/api/inference/status');
-        const data = await res.json();
-        if (!data.ready) {
-            container.innerHTML += `<div class="panel"><div class="panel-body text-muted">No model loaded.</div></div>`;
-            return;
-        }
-    } catch (e) {
-        container.innerHTML += `<div class="panel"><div class="panel-body text-muted">Cannot reach backend.</div></div>`;
+        const r = await fetch('/api/inference/status');
+        ready = (await r.json()).ready;
+    } catch (e) {}
+    if (!ready) {
+        container.innerHTML = `<div class="view-title">Explainability</div>
+            <div class="panel"><div class="panel-body text-muted">No model loaded.</div></div>`;
         return;
     }
 
-    // Mode toggle
-    const modeBar = document.createElement('div');
-    modeBar.className = 'flex-between mb-16';
-    modeBar.innerHTML = `
-        <button class="btn btn-primary" id="explain-run">Analyze</button>
-        <span class="text-sm text-muted" id="explain-time"></span>
+    // ── Header ──
+    const hdr = document.createElement('div');
+    hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-shrink:0;padding-bottom:4px;border-bottom:2px solid var(--border);margin-bottom:6px;';
+    hdr.innerHTML = `
+        <span style="font-size:14px;font-weight:bold;text-transform:uppercase;letter-spacing:2px;">Explainability</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn" id="nn-orient" style="font-size:10px;padding:2px 8px;">↔ Horizontal</button>
+            <span class="text-sm text-muted" id="ex-status">Draw to start</span>
+        </div>
     `;
-    container.appendChild(modeBar);
+    container.appendChild(hdr);
 
-    const layout = document.createElement('div');
-    layout.className = 'grid-3';
-    container.appendChild(layout);
+    // ── 3-column main ──
+    const main = document.createElement('div');
+    main.style.cssText = 'display:flex;flex:1;gap:6px;min-height:0;overflow:hidden;';
+    container.appendChild(main);
 
-    // ── Input panel ──
-    const inputPanel = document.createElement('div');
-    inputPanel.className = 'panel';
-    inputPanel.innerHTML = '<div class="panel-header">Input</div>';
-    const inputBody = document.createElement('div');
-    inputBody.className = 'panel-body';
+    // ══════════ LEFT: Canvas + Predictions ══════════
+    const leftCol = document.createElement('div');
+    leftCol.style.cssText = 'width:210px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;overflow:hidden;';
+    main.appendChild(leftCol);
 
-    const canvasObj = createCanvas(224);
-    inputBody.appendChild(canvasObj.element);
+    const canvasPanel = mkPanel('Draw');
+    canvasPanel.el.style.flexShrink = '0';
+    const canvasObj = createCanvas(190);
+    canvasPanel.body.style.padding = '4px';
+    canvasPanel.body.style.display = 'flex';
+    canvasPanel.body.style.justifyContent = 'center';
+    canvasPanel.body.appendChild(canvasObj.element);
+    leftCol.appendChild(canvasPanel.el);
 
-    const processedImg = document.createElement('div');
-    processedImg.className = 'mt-8';
-    processedImg.innerHTML = '<div class="text-sm text-muted">Processed 28×28 appears after analysis</div>';
-    inputBody.appendChild(processedImg);
+    const predPanel = mkPanel('Predictions');
+    predPanel.el.style.flex = '1';
+    predPanel.el.style.overflow = 'hidden';
+    predPanel.body.style.cssText = 'padding:4px;overflow-y:auto;';
+    const barsEl = createConfidenceBars([]);
+    predPanel.body.appendChild(barsEl);
+    leftCol.appendChild(predPanel.el);
 
-    inputPanel.appendChild(inputBody);
-    layout.appendChild(inputPanel);
+    // ══════════ CENTER: Network Flow (top) + NN Diagram (bottom) ══════════
+    const centerCol = document.createElement('div');
+    centerCol.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;overflow:hidden;';
+    main.appendChild(centerCol);
 
-    // ── Network flow panel ──
-    const flowPanel = document.createElement('div');
-    flowPanel.className = 'panel';
-    flowPanel.innerHTML = '<div class="panel-header">Network Flow</div>';
-    const flowBody = document.createElement('div');
-    flowBody.className = 'panel-body';
-    flowBody.id = 'explain-flow';
+    // Network Flow — scrollable list of layers with inline feature maps
+    const flowPanel = mkPanel('Network Flow');
+    flowPanel.el.style.cssText += 'height:220px;flex-shrink:0;overflow:hidden;';
+    flowPanel.body.style.cssText = 'overflow-y:auto;padding:4px;';
+    flowPanel.body.id = 'flow-body';
+    centerCol.appendChild(flowPanel.el);
 
-    const featureMapArea = document.createElement('div');
-    featureMapArea.id = 'explain-featuremaps';
-    featureMapArea.className = 'mt-8';
+    // NN Diagram — fills remaining space
+    const nnPanel = mkPanel('Neural Network');
+    nnPanel.el.style.cssText += 'flex:1;overflow:hidden;';
+    const nnWrap = document.createElement('div');
+    nnWrap.style.cssText = 'flex:1;position:relative;min-height:0;';
+    const nnCanvas = document.createElement('canvas');
+    nnCanvas.style.cssText = 'width:100%;height:100%;display:block;';
+    nnWrap.appendChild(nnCanvas);
+    nnPanel.el.appendChild(nnWrap);
+    centerCol.appendChild(nnPanel.el);
 
-    const networkFlow = createNetworkFlow(
-        ['stem', 'block_0', 'block_1', 'block_2', 'block_3', 'output'],
-        async (layerName) => {
-            if (!cachedPixels) return;
-            featureMapArea.innerHTML = '<div class="text-sm text-muted">Loading...</div>';
-            try {
-                const res = await fetch('/api/explain/layer', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pixels: cachedPixels, layer_name: layerName, max_channels: 16 }),
+    // ══════════ RIGHT: Prob Evolution + Performance ══════════
+    const rightCol = document.createElement('div');
+    rightCol.style.cssText = 'width:180px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;overflow:hidden;';
+    main.appendChild(rightCol);
+
+    const evoPanel = mkPanel('Prob. Evolution');
+    evoPanel.el.style.cssText += 'flex:1;overflow:hidden;';
+    const evoWrap = document.createElement('div');
+    evoWrap.style.cssText = 'flex:1;position:relative;min-height:0;';
+    const evoCanvas = document.createElement('canvas');
+    evoCanvas.style.cssText = 'width:100%;height:100%;display:block;';
+    evoWrap.appendChild(evoCanvas);
+    evoPanel.el.appendChild(evoWrap);
+    rightCol.appendChild(evoPanel.el);
+
+    const perfPanel = mkPanel('Performance');
+    perfPanel.el.style.flexShrink = '0';
+    perfPanel.body.style.cssText = 'padding:6px;font-size:11px;';
+    perfPanel.body.id = 'perf-body';
+    perfPanel.body.textContent = '—';
+    rightCol.appendChild(perfPanel.el);
+
+    // ══════════════════════════════════════════════════
+    // STATE
+    // ══════════════════════════════════════════════════
+    let isVertical = true;
+    let layerData = [];       // from /explain/live → layers[]
+    let particles = [];
+    let evoHistory = [];
+    let lastFullTime = 0;
+    const nnCtx = nnCanvas.getContext('2d');
+    const evoCtx = evoCanvas.getContext('2d');
+    const MAX_NODES = 16;
+
+    document.getElementById('nn-orient').addEventListener('click', () => {
+        isVertical = !isVertical;
+        document.getElementById('nn-orient').textContent = isVertical ? '↔ Horizontal' : '↕ Vertical';
+    });
+
+    // ══════════════════════════════════════════════════
+    // RESIZE
+    // ══════════════════════════════════════════════════
+    function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        [[nnCanvas, nnWrap], [evoCanvas, evoWrap]].forEach(([cv, wrap]) => {
+            const w = wrap.clientWidth, h = wrap.clientHeight;
+            if (w > 0 && h > 0) {
+                cv.width = w * dpr; cv.height = h * dpr;
+                cv.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+        });
+    }
+    const ro = new ResizeObserver(resize);
+    ro.observe(nnWrap);
+    ro.observe(evoWrap);
+    setTimeout(resize, 100);
+
+    // ══════════════════════════════════════════════════
+    // NETWORK FLOW (feature maps per layer, top center)
+    // ══════════════════════════════════════════════════
+    function updateNetworkFlow(fullData) {
+        const body = document.getElementById('flow-body');
+        if (!body) return;
+        body.innerHTML = '';
+        if (!fullData || !fullData.feature_maps) return;
+
+        const layerNames = fullData.layers || Object.keys(fullData.feature_maps);
+
+        layerNames.forEach(name => {
+            const maps = fullData.feature_maps[name];
+            if (!maps) return;
+
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px;border:1px solid var(--border-light);';
+
+            // Layer info
+            const info = document.createElement('div');
+            info.style.cssText = 'width:80px;flex-shrink:0;';
+            info.innerHTML = `<div style="font-weight:600;font-size:12px;">${name}</div>
+                <div style="font-size:9px;color:var(--muted);">${maps.total_channels}ch · ${maps.spatial_size[0]}×${maps.spatial_size[1]}</div>`;
+            row.appendChild(info);
+
+            // Activation bar
+            const actBar = document.createElement('div');
+            actBar.style.cssText = 'width:40px;height:6px;background:#eee;flex-shrink:0;overflow:hidden;';
+            const actFill = document.createElement('div');
+            const avgImp = maps.heatmaps.reduce((s, h) => s + h.importance, 0) / Math.max(maps.heatmaps.length, 1);
+            actFill.style.cssText = `height:100%;width:${Math.min(100, avgImp * 200)}%;background:#000;`;
+            actBar.appendChild(actFill);
+            row.appendChild(actBar);
+
+            // Feature map thumbnails
+            const fmGrid = document.createElement('div');
+            fmGrid.style.cssText = 'display:flex;flex-wrap:wrap;gap:2px;flex:1;min-width:0;';
+            (maps.heatmaps || []).slice(0, 16).forEach(hm => {
+                const img = document.createElement('img');
+                img.src = 'data:image/png;base64,' + hm.heatmap;
+                img.title = `ch${hm.channel} imp:${hm.importance.toFixed(3)}`;
+                img.style.cssText = 'width:28px;height:28px;image-rendering:pixelated;border:1px solid #ddd;';
+                fmGrid.appendChild(img);
+            });
+            row.appendChild(fmGrid);
+
+            body.appendChild(row);
+        });
+
+        // Arrow between layers
+        const arrows = body.querySelectorAll('.flow-arrow');
+        // Already inline — no separate arrows needed, each row is a layer
+    }
+
+    // ══════════════════════════════════════════════════
+    // NN DIAGRAM — nodes, connections, particles
+    // ══════════════════════════════════════════════════
+    function computePositions() {
+        const w = nnWrap.clientWidth, h = nnWrap.clientHeight;
+        if (!layerData.length || w < 20 || h < 20) return [];
+
+        const n = layerData.length;
+        const padX = 50, padY = 30;
+        const positions = [];
+
+        layerData.forEach((layer, li) => {
+            const nodeVals = layer.node_values || [];
+            const visible = Math.min(nodeVals.length, MAX_NODES);
+            const vals = nodeVals.slice(0, visible);
+
+            let cx, cy;
+            if (isVertical) {
+                // Top-to-bottom
+                cx = w / 2;
+                cy = padY + (li / Math.max(n - 1, 1)) * (h - padY * 2);
+            } else {
+                // Left-to-right
+                cx = padX + (li / Math.max(n - 1, 1)) * (w - padX * 2);
+                cy = h / 2;
+            }
+
+            const maxSpread = isVertical
+                ? Math.min(w - 120, visible * 20)
+                : Math.min(h - padY * 2, visible * 18);
+            const gap = visible > 1 ? maxSpread / (visible - 1) : 0;
+
+            const nodes = [];
+            for (let ni = 0; ni < visible; ni++) {
+                const offset = (ni - (visible - 1) / 2) * gap;
+                nodes.push({
+                    x: isVertical ? cx + offset : cx,
+                    y: isVertical ? cy : cy + offset,
+                    val: vals[ni] || 0,
+                    isWinner: layer.type === 'output' && layer.winner !== undefined && ni === layer.winner,
                 });
-                const data = await res.json();
-                featureMapArea.innerHTML = '';
-                if (data.error) {
-                    featureMapArea.innerHTML = `<div class="text-sm text-muted">${data.error}</div>`;
-                } else {
-                    featureMapArea.appendChild(createFeatureMapViewer(data));
+            }
+            positions.push({
+                cx, cy, nodes, layer, visible,
+                hasMore: (layer.channels || 0) > visible,
+            });
+        });
+        return positions;
+    }
+
+    function drawNN() {
+        const w = nnWrap.clientWidth, h = nnWrap.clientHeight;
+        nnCtx.clearRect(0, 0, w, h);
+
+        if (!layerData.length) {
+            nnCtx.fillStyle = '#bbb';
+            nnCtx.font = '12px sans-serif';
+            nnCtx.textAlign = 'center';
+            nnCtx.fillText('Draw on the canvas to see the network activate', w / 2, h / 2);
+            return;
+        }
+
+        const positions = computePositions();
+
+        // ── Connections ──
+        for (let li = 0; li < positions.length - 1; li++) {
+            const from = positions[li], to = positions[li + 1];
+            const fSample = sampleN(from.nodes.length, Math.min(from.nodes.length, 8));
+            const tSample = sampleN(to.nodes.length, Math.min(to.nodes.length, 8));
+            for (const fi of fSample) {
+                for (const ti of tSample) {
+                    const act = (from.nodes[fi].val + to.nodes[ti].val) / 2;
+                    if (act > 0.5) {
+                        const t = (act - 0.5) * 2;
+                        nnCtx.strokeStyle = `rgba(0,${Math.round(100 * t)},0,${0.03 + t * 0.1})`;
+                    } else {
+                        const t = (0.5 - act) * 2;
+                        nnCtx.strokeStyle = `rgba(${Math.round(100 * t)},0,0,${0.03 + t * 0.06})`;
+                    }
+                    nnCtx.lineWidth = 0.5;
+                    nnCtx.beginPath();
+                    nnCtx.moveTo(from.nodes[fi].x, from.nodes[fi].y);
+                    nnCtx.lineTo(to.nodes[ti].x, to.nodes[ti].y);
+                    nnCtx.stroke();
                 }
-            } catch (e) {
-                featureMapArea.innerHTML = `<div class="text-sm text-muted">Error: ${e.message}</div>`;
             }
         }
-    );
 
-    flowBody.appendChild(networkFlow);
-    flowBody.appendChild(featureMapArea);
-    flowPanel.appendChild(flowBody);
-    layout.appendChild(flowPanel);
+        // ── Particles ──
+        particles.forEach(p => {
+            const alpha = Math.max(0, 1 - Math.abs(p.progress - 0.5) * 2);
+            nnCtx.fillStyle = p.val > 0.5
+                ? `rgba(0,150,0,${alpha * 0.9})`
+                : `rgba(180,0,0,${alpha * 0.7})`;
+            nnCtx.beginPath();
+            nnCtx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+            nnCtx.fill();
+        });
 
-    // ── Output panel ──
-    const outPanel = document.createElement('div');
-    outPanel.className = 'panel';
-    outPanel.innerHTML = '<div class="panel-header">Output</div>';
-    const outBody = document.createElement('div');
-    outBody.className = 'panel-body';
+        // ── Nodes ──
+        positions.forEach(lp => {
+            lp.nodes.forEach(node => {
+                const r = node.isWinner ? 7 : lp.layer.type === 'output' ? 5 : 4;
+                const v = node.val;
 
-    const predBars = createConfidenceBars([]);
-    outBody.appendChild(predBars);
+                // Color: 0=red → 0.5=black → 1=green
+                let cr, cg, cb;
+                if (v > 0.5) {
+                    const t = (v - 0.5) * 2;
+                    cr = Math.round(20 * (1 - t));
+                    cg = Math.round(20 + 160 * t);
+                    cb = Math.round(20 * (1 - t));
+                } else {
+                    const t = v * 2;
+                    cr = Math.round(180 * (1 - t) + 20 * t);
+                    cg = Math.round(20 * t);
+                    cb = Math.round(20 * t);
+                }
 
-    const evolTitle = document.createElement('div');
-    evolTitle.className = 'text-bold text-sm mt-16 mb-8';
-    evolTitle.textContent = 'Probability Evolution';
-    outBody.appendChild(evolTitle);
+                nnCtx.fillStyle = `rgb(${cr},${cg},${cb})`;
+                nnCtx.strokeStyle = '#000';
+                nnCtx.lineWidth = node.isWinner ? 2.5 : 1;
+                nnCtx.beginPath();
+                nnCtx.arc(node.x, node.y, r, 0, Math.PI * 2);
+                nnCtx.fill();
+                nnCtx.stroke();
 
-    const evolArea = document.createElement('div');
-    evolArea.id = 'explain-evolution';
-    evolArea.innerHTML = '<div class="text-sm text-muted">Run analysis to see evolution</div>';
-    outBody.appendChild(evolArea);
+                // Winner double ring
+                if (node.isWinner) {
+                    nnCtx.strokeStyle = '#000';
+                    nnCtx.lineWidth = 1.5;
+                    nnCtx.beginPath();
+                    nnCtx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
+                    nnCtx.stroke();
+                }
+            });
 
-    outPanel.appendChild(outBody);
-    layout.appendChild(outPanel);
+            // Label
+            nnCtx.fillStyle = '#888';
+            nnCtx.font = '9px sans-serif';
+            if (isVertical) {
+                nnCtx.textAlign = 'left';
+                const rx = lp.nodes[lp.nodes.length - 1].x + 14;
+                let label = lp.layer.name;
+                if (lp.hasMore) label += ` (${lp.layer.channels}ch)`;
+                nnCtx.fillText(label, rx, lp.cy + 3);
+            } else {
+                nnCtx.textAlign = 'center';
+                const by = lp.nodes[lp.nodes.length - 1].y + 16;
+                nnCtx.fillText(lp.layer.name, lp.cx, by);
+                if (lp.hasMore) {
+                    nnCtx.font = '8px sans-serif';
+                    nnCtx.fillText(`${lp.layer.channels}ch`, lp.cx, by + 10);
+                }
+            }
+        });
+    }
 
-    // ── Analyze button ──
-    container.querySelector('#explain-run').addEventListener('click', async () => {
+    function spawnParticles() {
+        const positions = computePositions();
+        if (positions.length < 2) return;
+        for (let li = 0; li < positions.length - 1; li++) {
+            const from = positions[li], to = positions[li + 1];
+            for (let p = 0; p < 3; p++) {
+                const fi = Math.floor(Math.random() * from.nodes.length);
+                const ti = Math.floor(Math.random() * to.nodes.length);
+                particles.push({
+                    fromX: from.nodes[fi].x, fromY: from.nodes[fi].y,
+                    toX: to.nodes[ti].x, toY: to.nodes[ti].y,
+                    x: from.nodes[fi].x, y: from.nodes[fi].y,
+                    progress: 0,
+                    speed: 0.012 + Math.random() * 0.02,
+                    val: (from.nodes[fi].val + to.nodes[ti].val) / 2,
+                });
+            }
+        }
+    }
+
+    function updateParticles() {
+        particles = particles.filter(p => {
+            p.progress += p.speed;
+            p.x = p.fromX + (p.toX - p.fromX) * p.progress;
+            p.y = p.fromY + (p.toY - p.fromY) * p.progress;
+            return p.progress < 1;
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // PROBABILITY EVOLUTION CHART
+    // ══════════════════════════════════════════════════
+    function drawEvo() {
+        const w = evoWrap.clientWidth, h = evoWrap.clientHeight;
+        evoCtx.clearRect(0, 0, w, h);
+        if (!evoHistory.length) {
+            evoCtx.fillStyle = '#bbb';
+            evoCtx.font = '10px sans-serif';
+            evoCtx.textAlign = 'center';
+            evoCtx.fillText('No data yet', w / 2, h / 2);
+            return;
+        }
+
+        const pad = { t: 10, r: 30, b: 10, l: 26 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+        // Grid
+        evoCtx.strokeStyle = '#ddd';
+        evoCtx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.t + ph * i / 4;
+            evoCtx.beginPath();
+            evoCtx.moveTo(pad.l, y);
+            evoCtx.lineTo(pad.l + pw, y);
+            evoCtx.stroke();
+            evoCtx.fillStyle = '#aaa';
+            evoCtx.font = '8px sans-serif';
+            evoCtx.textAlign = 'right';
+            evoCtx.fillText(((4 - i) * 25) + '%', pad.l - 3, y + 3);
+        }
+
+        const colors = ['#000', '#555', '#999', '#bbb', '#ddd'];
+        for (let rank = 4; rank >= 0; rank--) {
+            evoCtx.strokeStyle = colors[rank];
+            evoCtx.lineWidth = rank === 0 ? 2 : 1;
+            evoCtx.beginPath();
+            let started = false;
+            evoHistory.forEach((snap, i) => {
+                if (rank >= snap.length) return;
+                const x = pad.l + (i / Math.max(evoHistory.length - 1, 1)) * pw;
+                const y = pad.t + ph - snap[rank].confidence * ph;
+                if (!started) { evoCtx.moveTo(x, y); started = true; }
+                else evoCtx.lineTo(x, y);
+            });
+            evoCtx.stroke();
+
+            // End label
+            const last = evoHistory[evoHistory.length - 1];
+            if (last && rank < last.length) {
+                evoCtx.fillStyle = colors[rank];
+                evoCtx.font = rank === 0 ? 'bold 9px sans-serif' : '8px sans-serif';
+                evoCtx.textAlign = 'left';
+                const y = pad.t + ph - last[rank].confidence * ph;
+                evoCtx.fillText(last[rank].display, pad.l + pw + 3, y + 3);
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    // REAL-TIME INFERENCE
+    // ══════════════════════════════════════════════════
+    let debounceTimer = null;
+
+    canvasObj.onChange(() => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runInference, 30);
+    });
+
+    async function runInference() {
         const pixels = canvasObj.getPixels();
         const sum = pixels.reduce((a, b) => a + b, 0);
-        if (sum < 1) return;
+        if (sum < 0.5) return;
+        if (pendingRequest) return; // don't stack requests
+        pendingRequest = true;
 
-        cachedPixels = pixels;
-        const btn = container.querySelector('#explain-run');
-        btn.disabled = true;
-        btn.textContent = 'Analyzing...';
-
+        const t0 = performance.now();
         try {
-            const res = await fetch('/api/explain/full', {
+            // Live endpoint — lightweight, for NN diagram
+            const liveRes = await fetch('/api/explain/live', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ pixels }),
             });
-            const data = await res.json();
+            const live = await liveRes.json();
+            if (live.error) { pendingRequest = false; return; }
 
-            if (data.error) {
-                btn.textContent = 'Analyze';
-                btn.disabled = false;
-                return;
+            // Update NN diagram data
+            layerData = live.layers || [];
+
+            // Update predictions
+            updateConfidenceBars(barsEl, live.predictions || []);
+
+            // Prob evolution
+            evoHistory.push(live.predictions || []);
+            if (evoHistory.length > 80) evoHistory.shift();
+
+            // Particles
+            spawnParticles();
+
+            // Status
+            const elapsed = performance.now() - t0;
+            const pred = live.predictions?.[0];
+            document.getElementById('ex-status').textContent = pred
+                ? `${pred.display} · ${(pred.confidence * 100).toFixed(1)}%`
+                : '—';
+            document.getElementById('perf-body').innerHTML =
+                `Inference: <strong>${live.inference_time_ms?.toFixed(1) || '?'}ms</strong><br>` +
+                `Round-trip: <strong>${elapsed.toFixed(0)}ms</strong><br>` +
+                `Layers: <strong>${layerData.length}</strong>`;
+
+            // Full explain (with feature maps) every 500ms
+            const now = Date.now();
+            if (now - lastFullTime > 500) {
+                lastFullTime = now;
+                try {
+                    const fullRes = await fetch('/api/explain/full', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pixels }),
+                    });
+                    const full = await fullRes.json();
+                    if (!full.error) updateNetworkFlow(full);
+                } catch (e) {}
             }
-
-            // Timing
-            container.querySelector('#explain-time').textContent = `${data.inference_time_ms.toFixed(1)}ms`;
-
-            // Processed input
-            if (data.input_image) {
-                processedImg.innerHTML = `
-                    <div class="text-sm text-bold mb-8">Processed 28×28</div>
-                    <img src="data:image/png;base64,${data.input_image}" 
-                         style="border:1px solid #000;image-rendering:pixelated;width:112px;height:112px;">
-                `;
-            }
-
-            // Predictions
-            updateConfidenceBars(predBars, data.predictions || []);
-
-            // Feature maps for first available layer
-            featureMapArea.innerHTML = '';
-            const firstLayer = Object.keys(data.feature_maps || {})[0];
-            if (firstLayer && data.feature_maps[firstLayer]) {
-                featureMapArea.appendChild(createFeatureMapViewer(data.feature_maps[firstLayer]));
-            }
-
-            // Probability evolution
-            evolArea.innerHTML = '';
-            if (data.probability_evolution) {
-                evolArea.appendChild(createProbEvolution(data.probability_evolution));
-            }
-
         } catch (e) {
-            console.error(e);
+            console.error('Explain error:', e);
         }
+        pendingRequest = false;
+    }
 
-        btn.textContent = 'Analyze';
-        btn.disabled = false;
-    });
+    // ══════════════════════════════════════════════════
+    // ANIMATION LOOP
+    // ══════════════════════════════════════════════════
+    function animate() {
+        updateParticles();
+        drawNN();
+        drawEvo();
+        animFrame = requestAnimationFrame(animate);
+    }
+    animate();
+}
+
+// ── Helpers ──
+
+function mkPanel(title) {
+    const el = document.createElement('div');
+    el.className = 'panel';
+    el.style.cssText = 'margin-bottom:0;display:flex;flex-direction:column;';
+    el.innerHTML = `<div class="panel-header" style="padding:4px 8px;font-size:10px;">${title}</div>`;
+    const body = document.createElement('div');
+    body.className = 'panel-body';
+    body.style.cssText = 'flex:1;display:flex;flex-direction:column;';
+    el.appendChild(body);
+    return { el, body };
+}
+
+function sampleN(total, count) {
+    if (count >= total) return Array.from({ length: total }, (_, i) => i);
+    const step = total / count;
+    return Array.from({ length: count }, (_, i) => Math.floor(i * step));
 }
