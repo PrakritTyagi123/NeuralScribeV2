@@ -105,16 +105,21 @@ export function createCanvas(size = 280) {
         element: wrapper,
         canvas,
         getPixels() {
-            // Downsample to 28x28 and return flat pixel array — no transforms
+            // Downsample to 28x28 and return flat pixel array
             const tmpCanvas = document.createElement('canvas');
             tmpCanvas.width = 28;
             tmpCanvas.height = 28;
             const tmpCtx = tmpCanvas.getContext('2d');
             tmpCtx.drawImage(canvas, 0, 0, 28, 28);
             const imageData = tmpCtx.getImageData(0, 0, 28, 28);
+
+            // Read into 28x28 grid then flip horizontally to match EMNIST
             const pixels = [];
-            for (let i = 0; i < imageData.data.length; i += 4) {
-                pixels.push(imageData.data[i] / 255.0);
+            for (let row = 0; row < 28; row++) {
+                for (let col = 27; col >= 0; col--) {
+                    const idx = (row * 28 + col) * 4;
+                    pixels.push(imageData.data[idx] / 255.0);
+                }
             }
             return pixels;
         },
