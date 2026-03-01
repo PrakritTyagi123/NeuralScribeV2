@@ -1,20 +1,41 @@
-/** Simple line chart using canvas 2D. No external dependencies. */
-export function createChart(width = 400, height = 200) {
+/** Responsive line chart — auto-sizes to container, HiDPI support. */
+export function createChart(defaultWidth = 500, height = 220) {
     const wrapper = document.createElement('div');
     wrapper.className = 'chart-container';
 
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
     wrapper.appendChild(canvas);
 
-    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
     let datasets = [];
+    let currentWidth = defaultWidth;
+
+    function resize() {
+        const w = wrapper.clientWidth || defaultWidth;
+        currentWidth = w;
+        canvas.width = w * dpr;
+        canvas.height = height * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = height + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        render();
+    }
+
+    // Auto-resize when container changes
+    const ro = new ResizeObserver(() => resize());
+
+    // Start observing after append
+    setTimeout(() => {
+        ro.observe(wrapper);
+        resize();
+    }, 50);
 
     function render() {
-        const w = canvas.width;
-        const h = canvas.height;
-        const pad = { top: 20, right: 10, bottom: 25, left: 50 };
+        const ctx = canvas.getContext('2d');
+        const w = currentWidth;
+        const h = height;
+        const pad = { top: 20, right: 15, bottom: 25, left: 55 };
         const plotW = w - pad.left - pad.right;
         const plotH = h - pad.top - pad.bottom;
 
@@ -30,7 +51,6 @@ export function createChart(width = 400, height = 200) {
             return;
         }
 
-        // Find range
         let allValues = datasets.flatMap(d => d.data);
         let minVal = Math.min(...allValues);
         let maxVal = Math.max(...allValues);
@@ -39,7 +59,7 @@ export function createChart(width = 400, height = 200) {
         else { minVal -= range * 0.05; maxVal += range * 0.05; }
         let maxLen = Math.max(...datasets.map(d => d.data.length));
 
-        // Grid lines
+        // Grid
         ctx.strokeStyle = '#eee';
         ctx.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
@@ -48,7 +68,6 @@ export function createChart(width = 400, height = 200) {
             ctx.moveTo(pad.left, y);
             ctx.lineTo(pad.left + plotW, y);
             ctx.stroke();
-
             const val = maxVal - (maxVal - minVal) * i / 4;
             ctx.fillStyle = '#999';
             ctx.font = '10px Courier New';
@@ -56,15 +75,15 @@ export function createChart(width = 400, height = 200) {
             ctx.fillText(val.toFixed(3), pad.left - 4, y + 3);
         }
 
-        // X-axis epoch labels
-        if (maxLen > 1) {
+        // X labels
+        if (maxLen >= 1) {
             ctx.fillStyle = '#999';
             ctx.font = '10px Courier New';
             ctx.textAlign = 'center';
-            const step = Math.max(1, Math.floor(maxLen / 8));
+            const step = Math.max(1, Math.floor(maxLen / 10));
             for (let i = 0; i < maxLen; i += step) {
                 const x = pad.left + (i / Math.max(maxLen - 1, 1)) * plotW;
-                ctx.fillText(i.toString(), x, pad.top + plotH + 14);
+                ctx.fillText((i + 1).toString(), x, pad.top + plotH + 14);
             }
         }
 
@@ -77,9 +96,8 @@ export function createChart(width = 400, height = 200) {
         ctx.lineTo(pad.left + plotW, pad.top + plotH);
         ctx.stroke();
 
-        // Lines + dots
         const colors = ['#000', '#888'];
-        const dashes = [[], [6, 3]];
+        const dashes = [[], [5, 3]];
 
         datasets.forEach((ds, di) => {
             if (ds.data.length === 0) return;
@@ -88,30 +106,25 @@ export function createChart(width = 400, height = 200) {
             ctx.fillStyle = color;
             ctx.lineWidth = 1.5;
             ctx.setLineDash(dashes[di % dashes.length]);
-
             const divisor = maxLen <= 1 ? 1 : maxLen - 1;
 
-            // Draw line
             if (ds.data.length >= 2) {
                 ctx.beginPath();
                 ds.data.forEach((val, i) => {
                     const x = pad.left + (i / divisor) * plotW;
                     const y = pad.top + plotH - ((val - minVal) / (maxVal - minVal)) * plotH;
-                    if (i === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 });
                 ctx.stroke();
             }
 
-            // Draw dots
             ds.data.forEach((val, i) => {
                 const x = pad.left + (i / divisor) * plotW;
                 const y = pad.top + plotH - ((val - minVal) / (maxVal - minVal)) * plotH;
                 ctx.beginPath();
-                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.arc(x, y, 2.5, 0, Math.PI * 2);
                 ctx.fill();
             });
-
             ctx.setLineDash([]);
         });
 
@@ -132,7 +145,6 @@ export function createChart(width = 400, height = 200) {
             ctx.fillText(ds.label || `Series ${di}`, x + 20, pad.top + 7);
         });
 
-        // X-axis label
         ctx.fillStyle = '#999';
         ctx.font = '10px Courier New';
         ctx.textAlign = 'center';
@@ -141,20 +153,10 @@ export function createChart(width = 400, height = 200) {
 
     return {
         element: wrapper,
-        setData(newDatasets) {
-            datasets = newDatasets;
-            render();
-        },
-        addPoint(datasetIndex, value) {
-            if (datasets[datasetIndex]) {
-                datasets[datasetIndex].data.push(value);
-                render();
-            }
-        },
-        clear() {
-            datasets = [];
-            render();
-        },
+        setData(newDatasets) { datasets = newDatasets; render(); },
+        addPoint(di, val) { if (datasets[di]) { datasets[di].data.push(val); render(); } },
+        clear() { datasets = []; render(); },
         render,
+        resize,
     };
 }

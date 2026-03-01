@@ -50,6 +50,7 @@ export function navigateTo(viewName) {
     // Render view
     const main = document.getElementById('main');
     main.innerHTML = '';
+    main.className = '';  // Reset any view-specific classes
     views[viewName](main);
 }
 

@@ -29,14 +29,17 @@ from ..ml.losses import CombinedLoss, mixup_data, mixup_criterion
 log = get_logger(__name__)
 
 
-def _emit_ws(ws_callback, data):
+def _emit_ws(ws_callback, data, main_loop=None):
     """Helper to call async ws_callback from sync code."""
     if ws_callback is None:
         return
     try:
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(ws_callback(data))
-        loop.close()
+        if main_loop:
+            asyncio.run_coroutine_threadsafe(ws_callback(data), main_loop)
+        else:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(ws_callback(data))
+            loop.close()
     except Exception:
         pass
 
@@ -129,9 +132,11 @@ class TrainingService:
         self._stop_requested = False
         self._is_paused = False
 
+        main_loop = asyncio.get_event_loop()
+
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._train_sync, train_loader, val_loader, ws_callback, resume_path
+            result = await main_loop.run_in_executor(
+                None, self._train_sync, train_loader, val_loader, ws_callback, resume_path, main_loop
             )
             return result
         except Exception as e:
@@ -155,10 +160,18 @@ class TrainingService:
 
     # ── Core training loop ──
 
-    def _train_sync(self, train_loader, val_loader, ws_callback, resume_path) -> Dict[str, Any]:
+    def _train_sync(self, train_loader, val_loader, ws_callback, resume_path, main_loop=None) -> Dict[str, Any]:
         cfg = self._config
         device = self._device
         total_epochs = cfg.get("training.epochs", 100)
+
+        # Log system info
+        import psutil
+        from ..utils.gpu_monitor import get_gpu_info
+        gpu = get_gpu_info()
+        mem = psutil.virtual_memory()
+        gpu_str = f' | GPU={gpu["name"]} {gpu["gpu_util_percent"]}% VRAM={gpu["memory_used_mb"]}/{gpu["memory_total_mb"]}MB' if gpu['available'] else ' | GPU=N/A'
+        log.info(f"System: CPU={psutil.cpu_percent()}% | RAM={mem.used // (1024**3)}/{mem.total // (1024**3)}GB ({mem.percent}%){gpu_str}")
 
         # Build model
         model = self._build_model()
@@ -221,11 +234,11 @@ class TrainingService:
             now = time.time()
             if now - last_ws[0] >= throttle:
                 last_ws[0] = now
-                _emit_ws(ws_callback, data)
+                _emit_ws(ws_callback, data, main_loop)
 
         def emit_force(data):
             self._training_state = data
-            _emit_ws(ws_callback, data)
+            _emit_ws(ws_callback, data, main_loop)
 
         # Checkpoint dir
         models_dir = PROJECT_ROOT / cfg.get("checkpointing.models_dir", "backend/models")
@@ -338,7 +351,7 @@ class TrainingService:
             emit_force(rec)
 
             log.info(
-                f"Epoch {epoch}/{total_epochs} — "
+                f"Epoch {epoch + 1}/{total_epochs} — "
                 f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
                 f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} "
                 f"lr={optimizer.param_groups[0]['lr']:.6f}"

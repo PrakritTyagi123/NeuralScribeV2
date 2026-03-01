@@ -113,3 +113,13 @@ async def loaded_model_info(request: Request):
         "n_params": model.count_parameters(),
         "num_classes": model.num_classes,
     }
+
+
+@router.post("/unload")
+async def unload_model(request: Request):
+    """Unload the currently loaded model from memory."""
+    s = _services(request)
+    s.interface_service._model = None
+    s.model_service._loaded_model = None
+    s.model_service._loaded_model_name = None
+    return {"message": "Model unloaded"}

@@ -82,12 +82,11 @@ export async function renderSetting(container) {
         const cats = reg.category_order || [];
         const classes = reg.classes || [];
         let regHTML = `<div class="text-sm mb-8">${reg.num_classes} classes across ${cats.length} categories</div>`;
-        regHTML += '<table class="table"><thead><tr><th>Category</th><th>Count</th><th>Samples</th></tr></thead><tbody>';
+        regHTML += '<table class="table"><thead><tr><th>Category</th><th>Count</th><th>All Classes</th></tr></thead><tbody>';
         cats.forEach(cat => {
             const catClasses = classes.filter(c => c.category === cat);
-            const samples = catClasses.slice(0, 8).map(c => c.display).join(' ');
-            const more = catClasses.length > 8 ? ` +${catClasses.length - 8}` : '';
-            regHTML += `<tr><td>${cat}</td><td>${catClasses.length}</td><td>${samples}${more}</td></tr>`;
+            const all = catClasses.map(c => `<span title="ID ${c.id}: ${c.label}">${c.display}</span>`).join('  ');
+            regHTML += `<tr><td>${cat}</td><td>${catClasses.length}</td><td>${all}</td></tr>`;
         });
         regHTML += '</tbody></table>';
         regBody.innerHTML = regHTML;

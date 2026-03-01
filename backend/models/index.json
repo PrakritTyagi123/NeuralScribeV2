@@ -1,10 +1,1 @@
-[
-  {
-    "name": "model_v2_20260228_235501_epoch_9",
-    "epoch": 9,
-    "val_acc": 0.5915,
-    "timestamp": "20260228_235501",
-    "file": "model_v2_20260228_235501_epoch_9.pth",
-    "size": "34.6 MB"
-  }
-]
+[]

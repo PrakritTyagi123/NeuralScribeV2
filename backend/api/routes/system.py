@@ -51,11 +51,46 @@ async def class_registry(request: Request):
 @router.post("/shutdown")
 async def shutdown(request: Request):
     """Gracefully shut down the server."""
-    # Stop training if running
     ts = _services(request).training_service
     if ts.is_training:
         ts.stop()
-
-    # Kill the process
     os.kill(os.getpid(), signal.SIGTERM)
     return {"status": "shutting down"}
+
+
+@router.post("/clear-all")
+async def clear_all(request: Request):
+    """Delete all cached data, models, and exports."""
+    import shutil
+    from ...utils.config import PROJECT_ROOT
+
+    # Unload model
+    s = _services(request)
+    s.interface_service._model = None
+    s.model_service._loaded_model = None
+    s.model_service._loaded_model_name = None
+
+    deleted = []
+
+    # Clear dataset cache
+    cache_dir = PROJECT_ROOT / "data" / "cache"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        deleted.append("dataset cache")
+
+    # Clear models (except index.json)
+    models_dir = PROJECT_ROOT / "backend" / "models"
+    if models_dir.exists():
+        for f in models_dir.iterdir():
+            if f.name == "index.json":
+                f.write_text("[]")
+            elif f.name == "exports":
+                if f.is_dir():
+                    shutil.rmtree(f)
+                    f.mkdir(parents=True, exist_ok=True)
+            else:
+                f.unlink()
+        deleted.append("models")
+
+    return {"message": f"Cleared: {', '.join(deleted)}"}

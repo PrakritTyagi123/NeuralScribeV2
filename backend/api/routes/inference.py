@@ -31,13 +31,37 @@ async def predict(request: Request, body: PredictRequest):
     if not svc.model_loaded:
         return {"error": "No model loaded. Load a model first via Model Manager."}
 
-    result = svc.predict(
-        pixel_data=body.pixels,
-        top_k=body.top_k,
-        use_tta=body.use_tta,
-    )
+    try:
+        result = svc.predict(
+            pixel_data=body.pixels,
+            top_k=body.top_k,
+            use_tta=body.use_tta,
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
-    return result
+
+@router.post("/debug-preview")
+async def debug_preview(request: Request, body: PredictRequest):
+    """Return the processed 28x28 image as base64 for debugging."""
+    import numpy as np
+    import base64
+    import io
+    from PIL import Image as PILImage
+    from ...ml.preprocess import preprocess_canvas_data, DEFAULT_MEAN, DEFAULT_STD
+
+    tensor = preprocess_canvas_data(body.pixels)
+    # Denormalize
+    img = tensor.squeeze().numpy() * DEFAULT_STD + DEFAULT_MEAN
+    img = (img * 255).clip(0, 255).astype(np.uint8)
+
+    pil = PILImage.fromarray(img, mode='L')
+    buf = io.BytesIO()
+    pil.save(buf, format='PNG')
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    return {"image_b64": b64, "shape": list(img.shape)}
 
 
 @router.get("/status")

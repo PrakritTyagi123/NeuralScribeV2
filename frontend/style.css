@@ -126,13 +126,22 @@ body {
 /* ── Common Components ── */
 
 .view-title {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: bold;
     text-transform: uppercase;
     letter-spacing: 2px;
-    padding-bottom: 12px;
+    padding-bottom: 8px;
     border-bottom: 2px solid var(--border);
-    margin-bottom: 16px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+/* Views that should fit viewport without scrolling */
+.view-fit {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 80px);
+    overflow: hidden;
 }
 
 .panel {
@@ -327,7 +336,8 @@ body {
     color: #ccc;
     padding: 8px;
     font-size: 11px;
-    height: 150px;
+    min-height: 150px;
+    height: 100%;
     overflow-y: auto;
     font-family: var(--font);
 }
@@ -353,13 +363,15 @@ body {
 /* Chart placeholder */
 .chart-container {
     border: 1px solid var(--border-light);
-    height: 200px;
     position: relative;
+    width: 100%;
+    overflow: hidden;
 }
 
 .chart-container canvas {
-    width: 100% !important;
-    height: 100% !important;
+    display: block;
+    width: 100%;
+    height: auto;
 }
 
 /* Confidence bars */

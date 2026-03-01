@@ -1,4 +1,4 @@
-/** Drawing canvas component for handwriting input. */
+/** Drawing canvas — standard orientation, raw pixel output. */
 export function createCanvas(size = 280) {
     const wrapper = document.createElement('div');
 
@@ -33,15 +33,17 @@ export function createCanvas(size = 280) {
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
+        let clientX, clientY;
         if (e.touches) {
-            return [
-                (e.touches[0].clientX - rect.left) * scaleX,
-                (e.touches[0].clientY - rect.top) * scaleY,
-            ];
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
         }
         return [
-            (e.clientX - rect.left) * scaleX,
-            (e.clientY - rect.top) * scaleY,
+            (clientX - rect.left) * scaleX,
+            (clientY - rect.top) * scaleY,
         ];
     }
 
@@ -60,7 +62,7 @@ export function createCanvas(size = 280) {
         lastY = y;
     }
 
-    function stopDraw(e) {
+    function stopDraw() {
         if (!drawing) return;
         drawing = false;
         if (onChangeCallback) onChangeCallback();
@@ -74,7 +76,6 @@ export function createCanvas(size = 280) {
     canvas.addEventListener('touchmove', moveDraw, { passive: false });
     canvas.addEventListener('touchend', stopDraw);
 
-    // Controls
     const controls = document.createElement('div');
     controls.className = 'flex gap-8 mt-8';
     controls.innerHTML = `
@@ -87,7 +88,6 @@ export function createCanvas(size = 280) {
     wrapper.appendChild(canvas);
     wrapper.appendChild(controls);
 
-    // Wire controls after append
     setTimeout(() => {
         const clearBtn = wrapper.querySelector('#canvas-clear');
         const brushInput = wrapper.querySelector('#canvas-brush');
@@ -105,7 +105,7 @@ export function createCanvas(size = 280) {
         element: wrapper,
         canvas,
         getPixels() {
-            // Downsample to 28x28 and return flat float array
+            // Downsample to 28x28 and return flat pixel array — no transforms
             const tmpCanvas = document.createElement('canvas');
             tmpCanvas.width = 28;
             tmpCanvas.height = 28;
@@ -114,7 +114,7 @@ export function createCanvas(size = 280) {
             const imageData = tmpCtx.getImageData(0, 0, 28, 28);
             const pixels = [];
             for (let i = 0; i < imageData.data.length; i += 4) {
-                pixels.push(imageData.data[i] / 255.0); // R channel (grayscale)
+                pixels.push(imageData.data[i] / 255.0);
             }
             return pixels;
         },

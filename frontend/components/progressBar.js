@@ -10,8 +10,9 @@ export function createProgressBar(percent = 0, text = '') {
 }
 
 export function updateProgressBar(el, percent, text = '') {
+    const clamped = Math.min(100, Math.max(0, percent));
     const fill = el.querySelector('.progress-fill');
     const label = el.querySelector('.progress-text');
-    if (fill) fill.style.width = percent + '%';
-    if (label) label.textContent = text || Math.round(percent) + '%';
+    if (fill) fill.style.width = clamped + '%';
+    if (label) label.textContent = text || Math.round(clamped) + '%';
 }

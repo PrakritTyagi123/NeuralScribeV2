@@ -144,9 +144,11 @@ class TTAAugmentor:
         Generate TTA variants from a single (1, 1, 28, 28) tensor.
         Returns: (N, 1, 28, 28) tensor of all variants.
         """
-        variants = [img_tensor.squeeze(0)]  # original
+        # Move to CPU for numpy operations
+        cpu_tensor = img_tensor.cpu()
+        variants = [cpu_tensor.squeeze(0)]  # original
 
-        img_np = (img_tensor.squeeze().numpy() * 0.3081 + 0.1307) * 255  # denormalize approx
+        img_np = (cpu_tensor.squeeze().numpy() * 0.3081 + 0.1307) * 255  # denormalize approx
         img_np = img_np.clip(0, 255).astype(np.uint8)
 
         for angle in self.rotations:

@@ -128,9 +128,12 @@ class DatasetService:
         self._cancel_requested = False
         self._progress = {"stage": "starting", "processed": 0, "total": 0}
 
+        # Capture main event loop before entering thread
+        main_loop = asyncio.get_event_loop()
+
         try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._prepare_sync, ws_callback
+            result = await main_loop.run_in_executor(
+                None, self._prepare_sync, ws_callback, main_loop
             )
             return result
         except Exception as e:
@@ -139,20 +142,16 @@ class DatasetService:
         finally:
             self._is_preparing = False
 
-    def _prepare_sync(self, ws_callback: Optional[Callable] = None) -> Dict[str, Any]:
+    def _prepare_sync(self, ws_callback: Optional[Callable] = None, main_loop=None) -> Dict[str, Any]:
         """Synchronous preparation pipeline."""
         start_time = time.time()
         config = self._prep_config
 
         def emit(data: Dict):
             self._progress = data
-            if ws_callback:
+            if ws_callback and main_loop:
                 try:
-                    # ws_callback might be sync or async
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(ws_callback(data))
-                    loop.close()
+                    asyncio.run_coroutine_threadsafe(ws_callback(data), main_loop)
                 except Exception:
                     pass
 

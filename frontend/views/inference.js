@@ -1,4 +1,4 @@
-/** Inference view — fast prediction mode. */
+/** Inference view — draw, predict, debug preview. */
 import { createCanvas } from '../components/canvas.js';
 import { createConfidenceBars, updateConfidenceBars } from '../components/confidenceBars.js';
 
@@ -7,7 +7,6 @@ let predictTimer = null;
 export async function renderInference(container) {
     container.innerHTML = `<div class="view-title">Inference</div>`;
 
-    // Check model status
     let modelReady = false;
     try {
         const res = await fetch('/api/inference/status');
@@ -32,13 +31,22 @@ export async function renderInference(container) {
     canvasPanel.innerHTML = '<div class="panel-header">Draw</div>';
     const canvasBody = document.createElement('div');
     canvasBody.className = 'panel-body';
-
     const canvasObj = createCanvas(280);
     canvasBody.appendChild(canvasObj.element);
+
+    // Debug preview — show processed 28x28
+    const debugRow = document.createElement('div');
+    debugRow.className = 'mt-8';
+    debugRow.innerHTML = `
+        <div class="text-sm text-muted mb-8">Processed input (what model sees):</div>
+        <img id="debug-preview" style="width:112px;height:112px;image-rendering:pixelated;border:1px solid #ccc;background:#000;" />
+    `;
+    canvasBody.appendChild(debugRow);
+
     canvasPanel.appendChild(canvasBody);
     layout.appendChild(canvasPanel);
 
-    // ── Prediction output ──
+    // ── Prediction ──
     const predPanel = document.createElement('div');
     predPanel.className = 'panel';
     predPanel.innerHTML = '<div class="panel-header">Prediction</div>';
@@ -61,19 +69,17 @@ export async function renderInference(container) {
 
     const timeText = document.createElement('div');
     timeText.className = 'text-sm text-muted mt-8';
-    timeText.textContent = '';
     predBody.appendChild(timeText);
 
     predPanel.appendChild(predBody);
     layout.appendChild(predPanel);
 
-    // ── Options + category grid ──
+    // ── Options ──
     const optPanel = document.createElement('div');
     optPanel.className = 'panel';
     optPanel.innerHTML = '<div class="panel-header">Options</div>';
     const optBody = document.createElement('div');
     optBody.className = 'panel-body';
-
     optBody.innerHTML = `
         <div class="form-group">
             <label>TTA (Test-Time Augmentation)</label>
@@ -91,13 +97,12 @@ export async function renderInference(container) {
     const catGrid = document.createElement('div');
     catGrid.id = 'inf-categories';
     catGrid.className = 'mt-16 text-sm';
-    catGrid.innerHTML = '<div class="text-muted">Category breakdown appears after prediction</div>';
+    catGrid.innerHTML = '<div class="text-muted">Category breakdown after prediction</div>';
     optBody.appendChild(catGrid);
-
     optPanel.appendChild(optBody);
     layout.appendChild(optPanel);
 
-    // ── Auto-predict on draw ──
+    // ── Auto-predict ──
     canvasObj.onChange(() => {
         if (predictTimer) clearTimeout(predictTimer);
         predictTimer = setTimeout(() => runPrediction(), 300);
@@ -108,7 +113,6 @@ export async function renderInference(container) {
         const useTTA = container.querySelector('#inf-tta').value === 'true';
         const topKVal = parseInt(container.querySelector('#inf-topk').value) || 5;
 
-        // Check if canvas is mostly empty
         const sum = pixels.reduce((a, b) => a + b, 0);
         if (sum < 1) {
             bigPred.textContent = '?';
@@ -118,12 +122,28 @@ export async function renderInference(container) {
         }
 
         try {
-            const res = await fetch('/api/inference/predict', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pixels, top_k: topKVal, use_tta: useTTA }),
-            });
-            const data = await res.json();
+            // Fetch prediction + debug preview in parallel
+            const [predRes, dbgRes] = await Promise.all([
+                fetch('/api/inference/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pixels, top_k: topKVal, use_tta: useTTA }),
+                }),
+                fetch('/api/inference/debug-preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pixels }),
+                }),
+            ]);
+
+            const data = await predRes.json();
+            const dbg = await dbgRes.json();
+
+            // Show debug preview
+            const previewImg = container.querySelector('#debug-preview');
+            if (previewImg && dbg.image_b64) {
+                previewImg.src = 'data:image/png;base64,' + dbg.image_b64;
+            }
 
             if (data.error) {
                 bigPred.textContent = '!';
@@ -136,7 +156,6 @@ export async function renderInference(container) {
             updateConfidenceBars(topK, data.top_k || []);
             timeText.textContent = `TTA: ${data.used_tta ? 'on' : 'off'}`;
 
-            // Category breakdown
             if (data.category_probabilities) {
                 let html = '';
                 for (const [cat, items] of Object.entries(data.category_probabilities)) {

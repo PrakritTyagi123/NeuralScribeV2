@@ -11,7 +11,7 @@ model:
   num_classes: 120
 training:
   epochs: 10
-  batch_size: 512
+  batch_size: 1024
   num_workers: 4
   pin_memory: true
   persistent_workers: true
