@@ -147,6 +147,13 @@ class ModelService:
     def get_loaded_model_name(self) -> Optional[str]:
         return self._loaded_model_name
 
+    def unload_model(self) -> None:
+        """Unload the currently loaded model from memory."""
+        if self._loaded_model is not None:
+            log.info(f"Unloading model: {self._loaded_model_name}")
+        self._loaded_model = None
+        self._loaded_model_name = None
+
     # ── ONNX Export ──
 
     def export_onnx(self, name: str) -> Dict[str, Any]:

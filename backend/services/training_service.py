@@ -390,8 +390,10 @@ class TrainingService:
                 images = images.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
                 with autocast('cuda', enabled=use_amp):
+                    # Use the same criterion as training for consistent
+                    # train/val loss comparison.
                     logits = model(images)
-                    loss = F.cross_entropy(logits, targets)
+                    loss = criterion(logits, targets)
                 loss_sum += loss.item() * images.size(0)
                 _, pred = logits.max(1)
                 all_preds.append(pred.cpu().numpy())
@@ -408,6 +410,22 @@ class TrainingService:
             per_class = compute_per_class_metrics(all_targets, all_preds, self._registry.num_classes)
 
         return val_loss, val_acc, per_class
+
+    # ── State reset ──
+
+    def reset(self) -> None:
+        """
+        Reset training-related state while not actively training.
+        Intended for maintenance endpoints like /system/clear-all.
+        """
+        if self._is_training:
+            # Do not silently reset while a run is in progress.
+            return
+        self._current_epoch = 0
+        self._best_val_acc = 0.0
+        self._history = []
+        self._training_state = {}
+        self._model = None
 
     # ── Checkpointing ──
 

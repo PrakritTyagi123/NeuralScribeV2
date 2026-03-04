@@ -32,7 +32,7 @@ preprocessing:
     std: 0.3081
 augmentation:
   precompute: true
-  precompute_factor: 10
+  precompute_factor: 1
   rotation_range:
   - -12
   - 12

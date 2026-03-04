@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -70,11 +71,23 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — allow frontend dev server
+    # CORS — environment-aware
+    app_env = os.getenv("APP_ENV", "dev").lower()
+    if app_env == "prod":
+        # In production, lock CORS down to an explicit origin to avoid
+        # exposing authenticated APIs to arbitrary websites.
+        frontend_origin = os.getenv("FRONTEND_ORIGIN", "")
+        allow_origins = [frontend_origin] if frontend_origin else []
+        allow_credentials = bool(frontend_origin)
+    else:
+        # During local development we keep CORS permissive for convenience.
+        allow_origins = ["*"]
+        allow_credentials = True
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=allow_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

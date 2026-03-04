@@ -7,7 +7,6 @@ import { renderDashboard } from '../views/dashboard.js';
 import { renderDataPrep } from '../views/dataPrep.js';
 import { renderTraining } from '../views/training.js';
 import { renderModelManager } from '../views/modelManager.js';
-import { renderInference } from '../views/inference.js';
 import { renderExplainability } from '../views/explainability.js';
 import { renderSetting } from '../views/setting.js';
 
@@ -16,7 +15,7 @@ const views = {
     dataPrep: renderDataPrep,
     training: renderTraining,
     modelManager: renderModelManager,
-    inference: renderInference,
+    // Unified inference + explain view: single Live Neural Network page
     explainability: renderExplainability,
     setting: renderSetting,
 };

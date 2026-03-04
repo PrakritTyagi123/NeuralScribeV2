@@ -1,21 +1,39 @@
+// Simple in-memory buffer so logs persist across tab changes
+// and are never culled while the app is running.
+const _logBuffer = [];
+
 /** Log console component. */
 export function createLogConsole() {
     const el = document.createElement('div');
     el.className = 'log-console';
     el.id = 'log-console';
+
+    // Replay any existing buffered entries so logs survive
+    // when switching views.
+    _logBuffer.forEach(html => {
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = html;
+        el.appendChild(entry);
+    });
+    el.scrollTop = el.scrollHeight;
+
     return el;
 }
 
 export function appendLog(container, message, level = 'info') {
     const el = container.querySelector ? container : document.getElementById('log-console');
-    if (!el) return;
     const time = new Date().toLocaleTimeString();
+    const html = `<span class="log-time">[${time}]</span> ${message}`;
+
+    // Always record into buffer first so it's not lost when
+    // the view is unmounted.
+    _logBuffer.push(html);
+
+    if (!el) return;
     const entry = document.createElement('div');
     entry.className = 'log-entry';
-    entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+    entry.innerHTML = html;
     el.appendChild(entry);
     el.scrollTop = el.scrollHeight;
-
-    // Keep max 200 entries
-    while (el.children.length > 200) el.removeChild(el.firstChild);
 }

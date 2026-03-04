@@ -119,7 +119,6 @@ async def loaded_model_info(request: Request):
 async def unload_model(request: Request):
     """Unload the currently loaded model from memory."""
     s = _services(request)
-    s.interface_service._model = None
-    s.model_service._loaded_model = None
-    s.model_service._loaded_model_name = None
+    s.interface_service.clear_model()
+    s.model_service.unload_model()
     return {"message": "Model unloaded"}

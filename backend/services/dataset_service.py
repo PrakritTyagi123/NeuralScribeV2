@@ -414,21 +414,63 @@ class DatasetService:
     def _split_dataset(
         self, images: np.ndarray, labels: np.ndarray, config: Config
     ) -> Dict[str, np.ndarray]:
-        """Split into train/val/test with stratification."""
+        """Split into train/val/test.
+
+        If split.stratified is true in the config, perform per-class
+        stratified splitting using the provided labels; otherwise fall
+        back to a simple random split.
+        """
         test_ratio = config.get("split.test_ratio", 0.15)
         val_ratio = config.get("split.val_ratio", 0.10)
         seed = config.get("split.seed", 42)
+        stratified = config.get("split.stratified", False)
 
         rng = np.random.RandomState(seed)
-        n = len(images)
-        indices = rng.permutation(n)
 
-        test_size = int(n * test_ratio)
-        val_size = int(n * val_ratio)
+        if not stratified:
+            # Simple random split
+            n = len(images)
+            indices = rng.permutation(n)
 
-        test_idx = indices[:test_size]
-        val_idx = indices[test_size:test_size + val_size]
-        train_idx = indices[test_size + val_size:]
+            test_size = int(n * test_ratio)
+            val_size = int(n * val_ratio)
+
+            test_idx = indices[:test_size]
+            val_idx = indices[test_size:test_size + val_size]
+            train_idx = indices[test_size + val_size:]
+        else:
+            # Per-class stratified split
+            unique_labels = np.unique(labels)
+            train_idx_list = []
+            val_idx_list = []
+            test_idx_list = []
+
+            for cls in unique_labels:
+                cls_indices = np.where(labels == cls)[0]
+                if cls_indices.size == 0:
+                    continue
+                cls_perm = rng.permutation(cls_indices)
+                n_cls = cls_perm.size
+
+                cls_test_size = int(n_cls * test_ratio)
+                cls_val_size = int(n_cls * val_ratio)
+
+                cls_test = cls_perm[:cls_test_size]
+                cls_val = cls_perm[cls_test_size:cls_test_size + cls_val_size]
+                cls_train = cls_perm[cls_test_size + cls_val_size:]
+
+                if cls_train.size:
+                    train_idx_list.append(cls_train)
+                if cls_val.size:
+                    val_idx_list.append(cls_val)
+                if cls_test.size:
+                    test_idx_list.append(cls_test)
+
+            # Concatenate per-class indices; final order is arbitrary but
+            # class distributions are preserved across splits.
+            train_idx = np.concatenate(train_idx_list) if train_idx_list else np.array([], dtype=int)
+            val_idx = np.concatenate(val_idx_list) if val_idx_list else np.array([], dtype=int)
+            test_idx = np.concatenate(test_idx_list) if test_idx_list else np.array([], dtype=int)
 
         return {
             "train_images": images[train_idx],

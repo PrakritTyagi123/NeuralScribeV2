@@ -60,6 +60,7 @@ export function createCanvas(size = 280) {
         draw(x, y);
         lastX = x;
         lastY = y;
+        if (onChangeCallback) onChangeCallback();
     }
 
     function stopDraw() {

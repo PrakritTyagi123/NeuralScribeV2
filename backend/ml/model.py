@@ -166,7 +166,7 @@ class NeuralScribeNet(nn.Module):
             self._activations.clear()
 
     def get_activations(self) -> Dict[str, torch.Tensor]:
-        return self._activations
+        return dict(self._activations)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._capture_activations:

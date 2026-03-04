@@ -43,6 +43,10 @@ class InterfaceService:
         self._model = model
         self._model.eval()
 
+    def clear_model(self) -> None:
+        """Clear the currently loaded model (used by maintenance endpoints)."""
+        self._model = None
+
     @property
     def model_loaded(self) -> bool:
         return self._model is not None
@@ -168,11 +172,14 @@ class InterfaceService:
         # Probability evolution
         prob_evolution = self._compute_probability_evolution(tensor)
 
-        # Feature map heatmaps
+        # Feature map heatmaps (conv + pooled / output vectors)
         feature_maps = {}
         for layer_name, act in activations.items():
-            if act.dim() == 4:  # Conv feature maps (B, C, H, W)
-                feature_maps[layer_name] = self._render_feature_maps(act, max_channels=16)
+            if layer_name == "logits":
+                continue
+            fm = self._render_feature_maps(act, max_channels=16)
+            if fm is not None:
+                feature_maps[layer_name] = fm
 
         # Top prediction
         top_probs, top_indices = probs.topk(5)
@@ -231,44 +238,84 @@ class InterfaceService:
         self,
         activations: torch.Tensor,
         max_channels: int = 16,
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Render feature map activations as base64 heatmap images.
-        Returns individual channel heatmaps + channel importance scores.
+
+        Supports both convolutional feature maps (B, C, H, W) and 1D / 2D
+        vectors such as pooled features or logits by treating each channel
+        as a 1×1 spatial map.
         """
-        # activations shape: (1, C, H, W)
-        act = activations.squeeze(0).cpu().numpy()  # (C, H, W)
-        n_channels = min(act.shape[0], max_channels)
+        act = activations
 
-        # Channel importance: mean absolute activation
-        importance = np.mean(np.abs(act), axis=(1, 2))  # (C,)
-        top_channels = np.argsort(importance)[::-1][:n_channels]
+        # Standard conv feature maps: (B, C, H, W)
+        if act.dim() == 4:
+            act_np = act.squeeze(0).cpu().numpy()  # (C, H, W)
 
-        heatmaps = []
-        for ch_idx in top_channels:
-            ch_map = act[ch_idx]
-            b64 = self._array_to_heatmap_base64(ch_map)
-            heatmaps.append({
-                "channel": int(ch_idx),
-                "importance": round(float(importance[ch_idx]), 4),
-                "heatmap": b64,
-            })
+            n_channels = min(act_np.shape[0], max_channels)
 
-        # Importance bars for all channels
-        importance_bars = [
-            {"channel": int(i), "importance": round(float(importance[i]), 4)}
-            for i in np.argsort(importance)[::-1][:32]
-        ]
+            # Channel importance: mean absolute activation
+            importance = np.mean(np.abs(act_np), axis=(1, 2))  # (C,)
+            top_channels = np.argsort(importance)[::-1][:n_channels]
+
+            heatmaps = []
+            for ch_idx in top_channels:
+                ch_map = act_np[ch_idx]
+                b64 = self._array_to_heatmap_base64(ch_map)
+                heatmaps.append({
+                    "channel": int(ch_idx),
+                    "importance": round(float(importance[ch_idx]), 4),
+                    "heatmap": b64,
+                })
+
+            importance_bars = [
+                {"channel": int(i), "importance": round(float(importance[i]), 4)}
+                for i in np.argsort(importance)[::-1][:32]
+            ]
+
+            return {
+                "heatmaps": heatmaps,
+                "importance": importance_bars,
+                "total_channels": act_np.shape[0],
+                "spatial_size": [act_np.shape[1], act_np.shape[2]],
+            }
+
+        # Pooled / output vectors — render as a single stripe heatmap
+        # so they are visible instead of tiny 1×1 tiles.
+        if act.dim() == 2:
+            vec = act.squeeze(0).cpu().numpy()  # (C,)
+        elif act.dim() == 1:
+            vec = act.cpu().numpy()  # (C,)
+        else:
+            return None
+
+        if vec.ndim != 1:
+            return None
+
+        stripe = vec[None, :]  # (1, C)
+
+        importance_val = float(np.mean(np.abs(vec)))
+        b64 = self._array_to_heatmap_base64(stripe)
 
         return {
-            "heatmaps": heatmaps,
-            "importance": importance_bars,
-            "total_channels": act.shape[0],
-            "spatial_size": [act.shape[1], act.shape[2]],
+            "heatmaps": [{
+                "channel": 0,
+                "importance": round(importance_val, 4),
+                "heatmap": b64,
+            }],
+            "importance": [{
+                "channel": 0,
+                "importance": round(importance_val, 4),
+            }],
+            "total_channels": int(vec.shape[0]),
+            "spatial_size": [stripe.shape[0], stripe.shape[1]],
         }
 
     def _array_to_heatmap_base64(self, arr: np.ndarray, size: int = 56) -> str:
         """Convert a 2D numpy array to a base64-encoded heatmap PNG."""
+        # Mirror horizontally so orientation matches drawing canvas
+        arr = np.fliplr(arr)
+
         # Normalize to 0-1
         vmin, vmax = arr.min(), arr.max()
         if vmax - vmin > 1e-8:
@@ -390,13 +437,8 @@ class InterfaceService:
             "node_values": input_nodes,
         })
 
-        import logging
-        log = logging.getLogger(__name__)
-        log.info(f"explain_live: activation keys = {list(activations.keys())}")
-
         for layer_name, act in activations.items():
             act_cpu = act.squeeze(0).cpu()
-            log.info(f"  {layer_name}: shape={act_cpu.shape}, dim={act_cpu.dim()}")
 
             if act_cpu.dim() == 3:  # Conv: (C, H, W)
                 # Per-channel mean activation (for individual nodes)
