@@ -313,9 +313,6 @@ class InterfaceService:
 
     def _array_to_heatmap_base64(self, arr: np.ndarray, size: int = 56) -> str:
         """Convert a 2D numpy array to a base64-encoded heatmap PNG."""
-        # Mirror horizontally so orientation matches drawing canvas
-        arr = np.fliplr(arr)
-
         # Normalize to 0-1
         vmin, vmax = arr.min(), arr.max()
         if vmax - vmin > 1e-8:

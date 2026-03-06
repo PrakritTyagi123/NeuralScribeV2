@@ -193,18 +193,36 @@ class TrainingService:
             betas=tuple(cfg.get("optimizer.betas", [0.9, 0.999])),
         )
 
-        # Scheduler
+        # Scheduler — warmup then cosine restarts
         warmup_epochs = cfg.get("scheduler.warmup_epochs", 3)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        T_0 = cfg.get("scheduler.T_0", 10)
+        T_mult = cfg.get("scheduler.T_mult", 2)
+        eta_min = cfg.get("scheduler.eta_min", 1e-5)
+        warmup_start_lr = cfg.get("scheduler.warmup_start_lr", 1e-4)
+        target_lr = cfg.get("optimizer.lr", 0.003)
+
+        # Build a proper sequential scheduler: linear warmup → cosine restarts
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer,
-            T_0=cfg.get("scheduler.T_0", 10),
-            T_mult=cfg.get("scheduler.T_mult", 2),
-            eta_min=cfg.get("scheduler.eta_min", 1e-5),
+            start_factor=warmup_start_lr / target_lr,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+        cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=T_0,
+            T_mult=T_mult,
+            eta_min=eta_min,
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[warmup_epochs],
         )
 
         # Mixed precision
         use_amp = cfg.get("mixed_precision.enabled", True) and device.type == "cuda"
-        scaler = GradScaler('cuda', enabled=use_amp)
+        scaler = GradScaler(enabled=use_amp)
 
         # Mixup
         mixup_alpha = cfg.get("regularization.mixup_alpha", 0.2)
@@ -224,6 +242,10 @@ class TrainingService:
             self._best_val_acc = ckpt.get("best_val_acc", 0.0)
             self._history = ckpt.get("history", [])
             log.info(f"Resumed from epoch {start_epoch}, best={self._best_val_acc:.4f}")
+        else:
+            # Fresh run — reset history and best accuracy
+            self._history = []
+            self._best_val_acc = 0.0
 
         # WS throttle
         last_ws = [0.0]
@@ -261,14 +283,6 @@ class TrainingService:
             self._current_epoch = epoch
             epoch_start = time.time()
 
-            # Warmup LR
-            if epoch < warmup_epochs:
-                w0 = cfg.get("scheduler.warmup_start_lr", 1e-4)
-                w1 = cfg.get("optimizer.lr", 0.003)
-                lr = w0 + (w1 - w0) * (epoch / max(warmup_epochs, 1))
-                for pg in optimizer.param_groups:
-                    pg["lr"] = lr
-
             # ── Train one epoch ──
             model.train()
             loss_sum = 0.0
@@ -289,7 +303,7 @@ class TrainingService:
 
                 optimizer.zero_grad(set_to_none=True)
 
-                with autocast('cuda', enabled=use_amp):
+                with autocast(device.type, enabled=use_amp):
                     logits = model(images)
                     loss = mixup_criterion(criterion, logits, ya, yb, lam) if do_mixup else criterion(logits, targets)
 
@@ -320,8 +334,7 @@ class TrainingService:
             if self._stop_requested:
                 break
 
-            if epoch >= warmup_epochs:
-                scheduler.step()
+            scheduler.step()
 
             train_loss = loss_sum / max(total, 1)
             train_acc = correct / max(total, 1)
@@ -389,7 +402,7 @@ class TrainingService:
             for images, targets in val_loader:
                 images = images.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
-                with autocast('cuda', enabled=use_amp):
+                with autocast(device.type, enabled=use_amp):
                     # Use the same criterion as training for consistent
                     # train/val loss comparison.
                     logits = model(images)

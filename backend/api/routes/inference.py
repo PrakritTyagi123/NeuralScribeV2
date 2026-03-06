@@ -19,6 +19,12 @@ class PredictRequest(BaseModel):
     top_k: int = 5
     use_tta: bool = False
 
+    def validate_pixels(self):
+        import math
+        size = int(math.sqrt(len(self.pixels)))
+        if size * size != len(self.pixels) or size < 1:
+            raise ValueError(f"pixels must be a perfect square length, got {len(self.pixels)}")
+
 
 @router.post("/predict")
 async def predict(request: Request, body: PredictRequest):
@@ -26,6 +32,11 @@ async def predict(request: Request, body: PredictRequest):
     Run inference on canvas pixel data.
     Returns top-k predictions, confidences, category probabilities, and timing.
     """
+    try:
+        body.validate_pixels()
+    except ValueError as e:
+        return {"error": str(e)}
+
     svc = _services(request).interface_service
 
     if not svc.model_loaded:

@@ -27,8 +27,9 @@ export function appendLog(container, message, level = 'info') {
     const html = `<span class="log-time">[${time}]</span> ${message}`;
 
     // Always record into buffer first so it's not lost when
-    // the view is unmounted.
+    // the view is unmounted.  Cap at 2000 entries.
     _logBuffer.push(html);
+    if (_logBuffer.length > 2000) _logBuffer.splice(0, _logBuffer.length - 2000);
 
     if (!el) return;
     const entry = document.createElement('div');

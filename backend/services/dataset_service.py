@@ -37,7 +37,7 @@ log = get_logger(__name__)
 EMNIST_BALANCED_LABELS = (
     list(range(10)) +                    # 0-9 → digits
     [chr(c) for c in range(65, 91)] +    # 10-35 → A-Z
-    list("abdeghnqrt")                   # 36-46 → lowercase subset (11 chars)
+    list("abdefghnqrt")                  # 36-46 → lowercase subset (11 chars)
     # Note: actual EMNIST balanced has specific merged mapping
 )
 
@@ -345,9 +345,11 @@ class DatasetService:
 
             img = images[i]
 
-            # Bbox crop + center of mass (only if not already 28x28 and centered)
-            if img.shape != (target_size, target_size):
-                img = bbox_crop_pad(img)
+            # Always apply bbox crop + center-of-mass alignment so that
+            # training data matches the inference preprocessing pipeline
+            # (preprocess_canvas_data always applies these transforms).
+            img = bbox_crop_pad(img)
+            if do_com:
                 img = center_of_mass_align(img, target_size)
 
             if do_smooth:

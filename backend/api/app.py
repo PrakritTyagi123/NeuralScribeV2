@@ -124,12 +124,13 @@ def create_app() -> FastAPI:
         # SPA fallback — serve index.html for all unmatched routes
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
+            from fastapi.responses import JSONResponse
             # Don't intercept API or WebSocket routes
             if full_path.startswith("api/") or full_path.startswith("ws"):
-                return {"error": "Not found"}
+                return JSONResponse({"error": "Not found"}, status_code=404)
             index = frontend_dir / "index.html"
             if index.exists():
                 return FileResponse(str(index), media_type="text/html")
-            return {"error": "Frontend not found"}
+            return JSONResponse({"error": "Frontend not found"}, status_code=404)
 
     return app

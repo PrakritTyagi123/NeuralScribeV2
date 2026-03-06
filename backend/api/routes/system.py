@@ -57,6 +57,12 @@ async def shutdown(request: Request):
     ts = _services(request).training_service
     if ts.is_training:
         ts.stop()
+        # Give the training thread a moment to finish its current batch
+        import asyncio
+        for _ in range(20):
+            await asyncio.sleep(0.5)
+            if not ts.is_training:
+                break
     os.kill(os.getpid(), signal.SIGTERM)
     return {"status": "shutting down"}
 

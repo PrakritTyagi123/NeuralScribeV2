@@ -152,26 +152,32 @@ class SyntheticSymbolGenerator:
         stroke_width: int = 0,
     ) -> np.ndarray:
         """Render a single character to a numpy array."""
-        # Draw on larger canvas first
         canvas = Image.new("L", (self.canvas_size, self.canvas_size), 0)
         draw = ImageDraw.Draw(canvas)
 
-        # Get text bounding box
         try:
             bbox = draw.textbbox((0, 0), char, font=font, stroke_width=stroke_width)
             tw = bbox[2] - bbox[0]
             th = bbox[3] - bbox[1]
+            # Skip if the glyph bbox is degenerate (font can't render it)
+            if tw < 2 or th < 2:
+                return None
             x = (self.canvas_size - tw) // 2 - bbox[0]
             y = (self.canvas_size - th) // 2 - bbox[1]
         except Exception:
-            x, y = self.canvas_size // 4, self.canvas_size // 4
+            return None
 
         draw.text(
             (x, y), char, fill=255, font=font,
             stroke_width=stroke_width, stroke_fill=255
         )
 
-        return np.array(canvas, dtype=np.float32)
+        arr = np.array(canvas, dtype=np.float32)
+        # Validate: if the rendered image is nearly blank, the font lacks this glyph
+        if arr.max() < 10 or np.sum(arr > 20) < 5:
+            return None
+
+        return arr
 
     def _add_variation(self, img: np.ndarray) -> np.ndarray:
         """Add random noise, blur, and small geometric variation to simulate handwriting."""
@@ -260,19 +266,34 @@ class SyntheticSymbolGenerator:
         """
         n = num_samples or self.samples_per_symbol
         images = []
+        max_attempts = n * 3  # allow retries for fonts that can't render the glyph
+        attempts = 0
 
-        for _ in range(n):
+        while len(images) < n and attempts < max_attempts:
+            attempts += 1
             font_size = random.choice(self.font_sizes)
             stroke_width = random.choice(self.stroke_widths)
             font = self._get_font(font_size)
 
             img = self._render_symbol(char, font, stroke_width)
+            if img is None:
+                continue  # font couldn't render this glyph, try another
+
             img = self._add_variation(img)
             img = self._to_28x28(img)
             images.append(img)
 
+        if len(images) == 0:
+            log.warning(f"Could not render any samples for '{char}' (class {class_id}) — no font supports this glyph")
+            # Return a minimal set of blank-ish images to avoid crashing
+            dummy = np.zeros((1, 28, 28), dtype=np.float32)
+            return dummy, np.array([class_id], dtype=np.int64)
+
+        if len(images) < n:
+            log.warning(f"Only generated {len(images)}/{n} samples for '{char}' (class {class_id})")
+
         images_array = np.stack(images, axis=0)
-        labels_array = np.full(n, class_id, dtype=np.int64)
+        labels_array = np.full(len(images), class_id, dtype=np.int64)
 
         return images_array, labels_array
 

@@ -7,6 +7,8 @@ import { state } from './state/appState.js';
 
 let ws = null;
 let reconnectTimer = null;
+let reconnectDelay = 1000;
+const MAX_RECONNECT_DELAY = 30000;
 const listeners = {};
 
 export function initWebSocket() {
@@ -26,6 +28,7 @@ function connect() {
 
     ws.onopen = () => {
         state.wsConnected = true;
+        reconnectDelay = 1000; // reset on successful connect
         emit('ws_connected', {});
     };
 
@@ -68,8 +71,9 @@ function scheduleReconnect() {
     if (reconnectTimer) return;
     reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
+        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
         connect();
-    }, 3000);
+    }, reconnectDelay);
 }
 
 export function wsSend(data) {

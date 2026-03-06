@@ -105,7 +105,7 @@ class NeuralScribeNet(nn.Module):
 
     def __init__(
         self,
-        num_classes: int = 120,
+        num_classes: int = 118,
         stem_channels: int = 32,
         block_channels: Optional[List[int]] = None,
         se_reduction: int = 16,
@@ -205,27 +205,39 @@ class NeuralScribeNet(nn.Module):
         """
         Run forward pass and project intermediate features through the classifier head
         to show how class probabilities evolve through the network.
+        Uses adaptive average pooling + linear projection when channel dims differ.
         """
         self.eval()
         evolution = []
 
         with torch.no_grad():
             feat = self.stem(x)
-            # Project stem output: pool → classify
-            pooled = self.pool(feat).flatten(1)
-            # Stem features have different channel count, need adapter
-            # We'll skip stem projection and start from blocks
 
             for i, block in enumerate(self.blocks):
                 feat = block(feat)
                 pooled = self.pool(feat).flatten(1)
-                # Only project if channel dim matches classifier input
+                # Project pooled features to num_classes for visualization
                 if pooled.shape[1] == self.classifier.in_features:
                     probs = F.softmax(self.classifier(pooled), dim=-1)
-                    evolution.append({
-                        "layer": f"block_{i}",
-                        "probabilities": probs.cpu().squeeze(0).numpy(),
-                    })
+                else:
+                    # Use a simple linear projection for mismatched dims
+                    # Scale by ratio to keep magnitudes comparable
+                    weight = self.classifier.weight  # (num_classes, in_features)
+                    # Adaptive: average-pool the weight columns to match pooled dim
+                    # or zero-pad the pooled features
+                    in_f = self.classifier.in_features
+                    cur_f = pooled.shape[1]
+                    if cur_f < in_f:
+                        # Zero-pad pooled to match classifier input
+                        padded = F.pad(pooled, (0, in_f - cur_f))
+                        probs = F.softmax(self.classifier(padded), dim=-1)
+                    else:
+                        # Truncate (unlikely but safe)
+                        probs = F.softmax(self.classifier(pooled[:, :in_f]), dim=-1)
+                evolution.append({
+                    "layer": f"block_{i}",
+                    "probabilities": probs.cpu().squeeze(0).numpy(),
+                })
 
             # Final pass through head
             pooled = self.pool(feat).flatten(1)

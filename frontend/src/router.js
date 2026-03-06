@@ -15,7 +15,6 @@ const views = {
     dataPrep: renderDataPrep,
     training: renderTraining,
     modelManager: renderModelManager,
-    // Unified inference + explain view: single Live Neural Network page
     explainability: renderExplainability,
     setting: renderSetting,
 };

@@ -1,0 +1,1 @@
+/** NeuralScribe v2 — Theme stub (reserved for future dark mode). */

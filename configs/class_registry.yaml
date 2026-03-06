@@ -1,12 +1,16 @@
 # NeuralScribe v2 — Class Registry
 # Full vocabulary: digits + Latin letters + Greek letters + scientific/math symbols
-# Total: ~120 classes
-
-# Format: each entry is { id: int, label: str, display: str, category: str }
-# Categories: digit, uppercase, lowercase, greek_upper, greek_lower, math_op, relational, bracket, calculus, arrow, misc_symbol
+#
+# DESIGN NOTES:
+# - Greek uppercase Alpha (Α) and Beta (Β) are REMOVED because they render
+#   identically to Latin A and B at 28x28.  The model cannot distinguish them.
+# - Greek lowercase rho (ρ) is kept since it has a descender that differs from 'p'.
+# - Visually confusable pairs are documented below for reference.
+#
+# Total: 118 classes (was 120, removed Alpha + Beta)
 
 version: 2
-total_classes: 120
+total_classes: 118
 
 classes:
   # ── Digits (0–9) ──
@@ -77,89 +81,80 @@ classes:
   - { id: 60, label: "y", display: "y", category: lowercase }
   - { id: 61, label: "z", display: "z", category: lowercase }
 
-  # ── Greek Uppercase ──
-  - { id: 62, label: "Alpha",   display: "Α", category: greek_upper }
-  - { id: 63, label: "Beta",    display: "Β", category: greek_upper }
-  - { id: 64, label: "Gamma",   display: "Γ", category: greek_upper }
-  - { id: 65, label: "Delta",   display: "Δ", category: greek_upper }
-  - { id: 66, label: "Theta",   display: "Θ", category: greek_upper }
-  - { id: 67, label: "Lambda",  display: "Λ", category: greek_upper }
-  - { id: 68, label: "Xi",      display: "Ξ", category: greek_upper }
-  - { id: 69, label: "Pi_upper",display: "Π", category: greek_upper }
-  - { id: 70, label: "Sigma",   display: "Σ", category: greek_upper }
-  - { id: 71, label: "Phi_upper",display: "Φ", category: greek_upper }
-  - { id: 72, label: "Psi",     display: "Ψ", category: greek_upper }
-  - { id: 73, label: "Omega",   display: "Ω", category: greek_upper }
+  # ── Greek Uppercase (Alpha/Beta REMOVED — identical to A/B) ──
+  - { id: 62, label: "Gamma",   display: "Γ", category: greek_upper }
+  - { id: 63, label: "Delta",   display: "Δ", category: greek_upper }
+  - { id: 64, label: "Theta",   display: "Θ", category: greek_upper }
+  - { id: 65, label: "Lambda",  display: "Λ", category: greek_upper }
+  - { id: 66, label: "Xi",      display: "Ξ", category: greek_upper }
+  - { id: 67, label: "Pi_upper",display: "Π", category: greek_upper }
+  - { id: 68, label: "Sigma",   display: "Σ", category: greek_upper }
+  - { id: 69, label: "Phi_upper",display: "Φ", category: greek_upper }
+  - { id: 70, label: "Psi",     display: "Ψ", category: greek_upper }
+  - { id: 71, label: "Omega",   display: "Ω", category: greek_upper }
 
   # ── Greek Lowercase ──
-  - { id: 74, label: "alpha",   display: "α", category: greek_lower }
-  - { id: 75, label: "beta",    display: "β", category: greek_lower }
-  - { id: 76, label: "gamma",   display: "γ", category: greek_lower }
-  - { id: 77, label: "delta",   display: "δ", category: greek_lower }
-  - { id: 78, label: "epsilon", display: "ε", category: greek_lower }
-  - { id: 79, label: "zeta",    display: "ζ", category: greek_lower }
-  - { id: 80, label: "eta",     display: "η", category: greek_lower }
-  - { id: 81, label: "theta",   display: "θ", category: greek_lower }
-  - { id: 82, label: "lambda",  display: "λ", category: greek_lower }
-  - { id: 83, label: "mu",      display: "μ", category: greek_lower }
-  - { id: 84, label: "pi",      display: "π", category: greek_lower }
-  - { id: 85, label: "rho",     display: "ρ", category: greek_lower }
-  - { id: 86, label: "sigma_l", display: "σ", category: greek_lower }
-  - { id: 87, label: "tau",     display: "τ", category: greek_lower }
-  - { id: 88, label: "phi",     display: "φ", category: greek_lower }
-  - { id: 89, label: "omega_l", display: "ω", category: greek_lower }
+  - { id: 72, label: "alpha",   display: "α", category: greek_lower }
+  - { id: 73, label: "beta",    display: "β", category: greek_lower }
+  - { id: 74, label: "gamma",   display: "γ", category: greek_lower }
+  - { id: 75, label: "delta",   display: "δ", category: greek_lower }
+  - { id: 76, label: "epsilon", display: "ε", category: greek_lower }
+  - { id: 77, label: "zeta",    display: "ζ", category: greek_lower }
+  - { id: 78, label: "eta",     display: "η", category: greek_lower }
+  - { id: 79, label: "theta",   display: "θ", category: greek_lower }
+  - { id: 80, label: "lambda",  display: "λ", category: greek_lower }
+  - { id: 81, label: "mu",      display: "μ", category: greek_lower }
+  - { id: 82, label: "pi",      display: "π", category: greek_lower }
+  - { id: 83, label: "rho",     display: "ρ", category: greek_lower }
+  - { id: 84, label: "sigma_l", display: "σ", category: greek_lower }
+  - { id: 85, label: "tau",     display: "τ", category: greek_lower }
+  - { id: 86, label: "phi",     display: "φ", category: greek_lower }
+  - { id: 87, label: "omega_l", display: "ω", category: greek_lower }
 
   # ── Math Operators ──
-  - { id: 90,  label: "plus",       display: "+", category: math_op }
-  - { id: 91,  label: "minus",      display: "−", category: math_op }
-  - { id: 92,  label: "times",      display: "×", category: math_op }
-  - { id: 93,  label: "divide",     display: "÷", category: math_op }
-  - { id: 94,  label: "equals",     display: "=", category: math_op }
-  - { id: 95,  label: "not_equal",  display: "≠", category: math_op }
-  - { id: 96,  label: "plus_minus", display: "±", category: math_op }
-  - { id: 97,  label: "dot",        display: "·", category: math_op }
+  - { id: 88,  label: "plus",       display: "+", category: math_op }
+  - { id: 89,  label: "minus",      display: "−", category: math_op }
+  - { id: 90,  label: "times",      display: "×", category: math_op }
+  - { id: 91,  label: "divide",     display: "÷", category: math_op }
+  - { id: 92,  label: "equals",     display: "=", category: math_op }
+  - { id: 93,  label: "not_equal",  display: "≠", category: math_op }
+  - { id: 94,  label: "plus_minus", display: "±", category: math_op }
+  - { id: 95,  label: "dot",        display: "·", category: math_op }
 
   # ── Relational Symbols ──
-  - { id: 98,  label: "less_than",      display: "<",  category: relational }
-  - { id: 99,  label: "greater_than",   display: ">",  category: relational }
-  - { id: 100, label: "less_equal",     display: "≤",  category: relational }
-  - { id: 101, label: "greater_equal",  display: "≥",  category: relational }
-  - { id: 102, label: "approx",         display: "≈",  category: relational }
+  - { id: 96,  label: "less_than",      display: "<",  category: relational }
+  - { id: 97,  label: "greater_than",   display: ">",  category: relational }
+  - { id: 98,  label: "less_equal",     display: "≤",  category: relational }
+  - { id: 99,  label: "greater_equal",  display: "≥",  category: relational }
+  - { id: 100, label: "approx",         display: "≈",  category: relational }
 
   # ── Brackets & Delimiters ──
-  - { id: 103, label: "paren_left",    display: "(", category: bracket }
-  - { id: 104, label: "paren_right",   display: ")", category: bracket }
-  - { id: 105, label: "bracket_left",  display: "[", category: bracket }
-  - { id: 106, label: "bracket_right", display: "]", category: bracket }
-  - { id: 107, label: "brace_left",    display: "{", category: bracket }
-  - { id: 108, label: "brace_right",   display: "}", category: bracket }
+  - { id: 101, label: "paren_left",    display: "(", category: bracket }
+  - { id: 102, label: "paren_right",   display: ")", category: bracket }
+  - { id: 103, label: "bracket_left",  display: "[", category: bracket }
+  - { id: 104, label: "bracket_right", display: "]", category: bracket }
+  - { id: 105, label: "brace_left",    display: "{", category: bracket }
+  - { id: 106, label: "brace_right",   display: "}", category: bracket }
 
   # ── Calculus & Advanced ──
-  - { id: 109, label: "integral",   display: "∫", category: calculus }
-  - { id: 110, label: "summation",  display: "∑", category: calculus }
-  - { id: 111, label: "product",    display: "∏", category: calculus }
-  - { id: 112, label: "sqrt",       display: "√", category: calculus }
-  - { id: 113, label: "infinity",   display: "∞", category: calculus }
-  - { id: 114, label: "partial",    display: "∂", category: calculus }
-  - { id: 115, label: "nabla",      display: "∇", category: calculus }
+  - { id: 107, label: "integral",   display: "∫", category: calculus }
+  - { id: 108, label: "summation",  display: "∑", category: calculus }
+  - { id: 109, label: "product",    display: "∏", category: calculus }
+  - { id: 110, label: "sqrt",       display: "√", category: calculus }
+  - { id: 111, label: "infinity",   display: "∞", category: calculus }
+  - { id: 112, label: "partial",    display: "∂", category: calculus }
+  - { id: 113, label: "nabla",      display: "∇", category: calculus }
 
   # ── Arrows ──
-  - { id: 116, label: "arrow_right", display: "→", category: arrow }
-  - { id: 117, label: "arrow_left",  display: "←", category: arrow }
+  - { id: 114, label: "arrow_right", display: "→", category: arrow }
+  - { id: 115, label: "arrow_left",  display: "←", category: arrow }
 
   # ── Miscellaneous Symbols ──
-  - { id: 118, label: "percent",  display: "%",  category: misc_symbol }
-  - { id: 119, label: "degree",   display: "°",  category: misc_symbol }
-
-# EMNIST mapping: EMNIST Balanced has 47 classes.
-# We map EMNIST classes to our IDs in code (see dataset_service.py).
-# EMNIST Balanced merges some confusable upper/lowercase pairs.
-# The mapping handles this by assigning EMNIST merged classes to the uppercase variant
-# and generating the missing lowercase variants synthetically.
+  - { id: 116, label: "percent",  display: "%",  category: misc_symbol }
+  - { id: 117, label: "degree",   display: "°",  category: misc_symbol }
 
 emnist_split: "balanced"
 
-# Categories for UI grouping
 category_order:
   - digit
   - uppercase

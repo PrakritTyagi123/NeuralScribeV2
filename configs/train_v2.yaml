@@ -6,41 +6,41 @@ model:
   - 256
   - 320
   se_reduction: 16
-  dropout: 0.4
-  drop_path_rate: 0.1
-  num_classes: 120
+  dropout: 0.2
+  drop_path_rate: 0.05
+  num_classes: 118
 training:
-  epochs: 10
-  batch_size: 1024
+  epochs: 100
+  batch_size: 256
   num_workers: 4
   pin_memory: true
   persistent_workers: true
 optimizer:
   type: adamw
-  lr: 0.003
+  lr: 0.002
   weight_decay: 0.0001
   betas:
   - 0.9
   - 0.999
 scheduler:
   type: cosine_warm_restarts
-  T_0: 10
+  T_0: 15
   T_mult: 2
   eta_min: 1.0e-05
-  warmup_epochs: 3
+  warmup_epochs: 5
   warmup_start_lr: 0.0001
 loss:
-  type: combined
-  label_smoothing: 0.08
-  focal_gamma: 1.5
-  focal_weight: 0.3
+  type: cross_entropy
+  label_smoothing: 0.04
+  focal_gamma: 0.0
+  focal_weight: 0.0
 regularization:
-  mixup_alpha: 0.2
-  mixup_probability: 0.5
+  mixup_alpha: 0.15
+  mixup_probability: 0.3
   cutmix_alpha: 0.0
   stochastic_depth: true
 augmentation:
-  online: true
+  online: false
   rotation_range:
   - -10
   - 10

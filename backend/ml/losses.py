@@ -67,6 +67,8 @@ class CombinedLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         loss_ce = self.ls_ce(logits, targets)
+        if self.focal_weight <= 0:
+            return loss_ce
         loss_focal = self.focal(logits, targets)
         return (1 - self.focal_weight) * loss_ce + self.focal_weight * loss_focal
 
