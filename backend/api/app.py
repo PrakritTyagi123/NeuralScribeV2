@@ -121,6 +121,10 @@ def create_app() -> FastAPI:
         async def serve_css():
             return FileResponse(str(frontend_dir / "style.css"), media_type="text/css")
 
+        @app.get("/lnn.css")
+        async def serve_lnn_css():
+            return FileResponse(str(frontend_dir / "lnn.css"), media_type="text/css")
+
         # SPA fallback — serve index.html for all unmatched routes
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
