@@ -96,18 +96,18 @@ export function updateFeatureMaps(fullData) {
         const group = mk('div', 'lnn-fm-group');
         const arch = ARCH.find(l => l.key === name);
         const title = mk('div', 'lnn-fm-title');
-        title.textContent = (arch ? arch.name : name) + ' · ' + maps.total_channels + 'ch · ' + maps.spatial_size[0] + '×' + maps.spatial_size[1];
+        title.textContent = (arch ? arch.name : name) + ' · ' + maps.total_channels + 'ch';
         group.appendChild(title);
 
         const grid = mk('div', 'lnn-fm-grid');
         maps.heatmaps.slice(0, 6).forEach(hm => {
-            const thumb = mk('div', 'lnn-fm-thumb');
+            const cell = mk('div', 'lnn-fm-cell');
             const img = document.createElement('img');
             img.src = 'data:image/png;base64,' + hm.heatmap;
-            img.title = 'ch' + hm.channel + ' imp=' + hm.importance.toFixed(3);
             img.className = 'lnn-fm-img';
-            thumb.appendChild(img);
-            grid.appendChild(thumb);
+            img.title = 'ch' + hm.channel + ' imp=' + hm.importance.toFixed(3);
+            cell.appendChild(img);
+            grid.appendChild(cell);
         });
         group.appendChild(grid);
         body.appendChild(group);

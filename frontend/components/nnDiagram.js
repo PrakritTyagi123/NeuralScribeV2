@@ -8,9 +8,9 @@ export const ARCH = [
     { name: 'Input',   n: 8,   vis: 8,  type: 'input',  key: 'input' },
     { name: 'Stem',    n: 32,  vis: 12, type: 'conv',   key: 'stem' },
     { name: 'Block 0', n: 64,  vis: 12, type: 'conv',   key: 'block_0' },
-    { name: 'Block 1', n: 128, vis: 16, type: 'conv',   key: 'block_1' },
-    { name: 'Block 2', n: 256, vis: 20, type: 'conv',   key: 'block_2' },
-    { name: 'Block 3', n: 320, vis: 24, type: 'conv',   key: 'block_3' },
+    { name: 'Block 1', n: 128, vis: 14, type: 'conv',   key: 'block_1' },
+    { name: 'Block 2', n: 256, vis: 16, type: 'conv',   key: 'block_2' },
+    { name: 'Block 3', n: 320, vis: 18, type: 'conv',   key: 'block_3' },
     { name: 'Pool',    n: 320, vis: 12, type: 'fc',     key: 'pooled' },
     { name: 'Output',  n: 62,  vis: 5,  type: 'output', key: 'output' },
 ];
@@ -31,15 +31,19 @@ export function computePositions(w, h, nodeAct) {
     const padLeft = 40;
     const padRight = 95;
     const padTop = 14;
-    const padBot = 44;
+    const padBot = 48;
     const usableW = w - padLeft - padRight;
     const usableH = h - padTop - padBot;
     const layerSpacing = usableW / Math.max(ARCH.length - 1, 1);
 
+    // Find the max visible node count to set a consistent node gap
+    const maxVis = Math.max(...ARCH.map(l => l.vis || VIS_DEFAULT));
+    const globalNodeGap = Math.min(22, usableH / Math.max(maxVis + 1, 1));
+
     ARCH.forEach((layer, li) => {
         const x = padLeft + li * layerSpacing;
         const visible = layer.vis || VIS_DEFAULT;
-        const nodeGap = Math.min(22, usableH / Math.max(visible + 1, 1));
+        const nodeGap = globalNodeGap;
         const totalH = (visible - 1) * nodeGap;
         const startY = padTop + (usableH - totalH) / 2;
 
@@ -74,36 +78,63 @@ export function drawNN(ctx, w, h, layerPos, outPreds, winIdx) {
     for (let li = 0; li < layerPos.length - 1; li++) {
         const from = layerPos[li];
         const to = layerPos[li + 1];
+        const fLen = from.nodes.length;
+        const tLen = to.nodes.length;
 
-        const maxLines = 120;
-        const totalPossible = from.nodes.length * to.nodes.length;
-        const drawAll = totalPossible <= maxLines;
+        // Build the set of (fi, ti) pairs to draw.
+        // Strategy: first ensure every node on BOTH sides has at least
+        // one connection (nearest-neighbor mapping), then add sampled
+        // cross-connections for density.
+        const pairs = new Set();
 
-        const fromIdx = drawAll ? from.nodes.map((_, i) => i) : sampleIndices(from.nodes.length, Math.min(from.nodes.length, 10));
-        const toIdx = drawAll ? to.nodes.map((_, i) => i) : sampleIndices(to.nodes.length, Math.min(to.nodes.length, 12));
+        // 1. Map each 'from' node to its nearest 'to' node (by position)
+        for (let fi = 0; fi < fLen; fi++) {
+            const ti = Math.round(fi / Math.max(fLen - 1, 1) * Math.max(tLen - 1, 1));
+            pairs.add(fi + ',' + ti);
+        }
+        // 2. Map each 'to' node to its nearest 'from' node
+        for (let ti = 0; ti < tLen; ti++) {
+            const fi = Math.round(ti / Math.max(tLen - 1, 1) * Math.max(fLen - 1, 1));
+            pairs.add(fi + ',' + ti);
+        }
 
-        for (const fi of fromIdx) {
-            for (const ti of toIdx) {
-                const fNode = from.nodes[fi];
-                const tNode = to.nodes[ti];
-                const avgAct = (fNode.activation + tNode.activation) / 2;
-
-                let alpha, thickness;
-                if (avgAct > 0.3) {
-                    alpha = 0.12 + avgAct * 0.45;
-                    thickness = 0.6 + avgAct * 1.8;
-                    ctx.strokeStyle = 'rgba(37,99,235,' + alpha + ')';
-                } else {
-                    alpha = 0.03 + avgAct * 0.12;
-                    thickness = 0.3;
-                    ctx.strokeStyle = 'rgba(100,116,139,' + alpha + ')';
+        // 3. Add sampled cross-connections for visual fullness
+        const maxExtra = 150;
+        const budget = maxExtra - pairs.size;
+        if (budget > 0) {
+            const fromSample = sampleIndices(fLen, Math.min(fLen, 10));
+            const toSample = sampleIndices(tLen, Math.min(tLen, 12));
+            outer:
+            for (const fi of fromSample) {
+                for (const ti of toSample) {
+                    pairs.add(fi + ',' + ti);
+                    if (pairs.size >= maxExtra) break outer;
                 }
-                ctx.lineWidth = thickness;
-                ctx.beginPath();
-                ctx.moveTo(fNode.x, fNode.y);
-                ctx.lineTo(tNode.x, tNode.y);
-                ctx.stroke();
             }
+        }
+
+        // Draw all collected pairs
+        for (const key of pairs) {
+            const [fi, ti] = key.split(',').map(Number);
+            const fNode = from.nodes[fi];
+            const tNode = to.nodes[ti];
+            const avgAct = (fNode.activation + tNode.activation) / 2;
+
+            let alpha, thickness;
+            if (avgAct > 0.3) {
+                alpha = 0.12 + avgAct * 0.45;
+                thickness = 0.6 + avgAct * 1.8;
+                ctx.strokeStyle = 'rgba(37,99,235,' + alpha + ')';
+            } else {
+                alpha = 0.03 + avgAct * 0.12;
+                thickness = 0.3;
+                ctx.strokeStyle = 'rgba(100,116,139,' + alpha + ')';
+            }
+            ctx.lineWidth = thickness;
+            ctx.beginPath();
+            ctx.moveTo(fNode.x, fNode.y);
+            ctx.lineTo(tNode.x, tNode.y);
+            ctx.stroke();
         }
     }
 
