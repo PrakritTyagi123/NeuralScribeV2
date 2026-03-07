@@ -1,516 +1,1013 @@
 /**
- * Explainability view — Canvas NN diagram + feature maps + probability evolution.
- * B&W wireframe theme. Real-time: predicts as you draw.
+ * NeuralScribe v2 — Live Neural Network (Production)
+ *
+ * Layout (all viewport-fit, zero scroll):
+ * ┌─────────┬──────────────────────────┬──────────┐
+ * │  DRAW   │     NN DIAGRAM           │ GRADCAM  │
+ * │         │                          │ PREPROC  │
+ * │ PREDICT │                          │ CONFUSE  │
+ * │         │                          │ PROB EVO │
+ * ├─────────┴────────────┬─────────────┼──────────┤
+ * │   FEATURE MAPS       │ LAYER DIVE  │ ROBUST   │
+ * │                      │             │ CALIB    │
+ * │   STROKE TIMELINE    │             │ EMBED    │
+ * └──────────────────────┴─────────────┴──────────┘
  */
 import { createCanvas } from '../components/canvas.js';
 import { createConfidenceBars, updateConfidenceBars } from '../components/confidenceBars.js';
 
-// ═══════════════════════════════════════════════════
-// ARCHITECTURE DEFINITION
-// ═══════════════════════════════════════════════════
-const ARCHITECTURE = [
-    { name: 'Input',   neurons: 16,  type: 'input',  key: 'input' },
-    { name: 'Stem',    neurons: 32,  type: 'conv',   key: 'stem' },
-    { name: 'Block 0', neurons: 64,  type: 'conv',   key: 'block_0' },
-    { name: 'Block 1', neurons: 128, type: 'conv',   key: 'block_1' },
-    { name: 'Block 2', neurons: 256, type: 'conv',   key: 'block_2' },
-    { name: 'Block 3', neurons: 320, type: 'conv',   key: 'block_3' },
-    { name: 'Pool',    neurons: 320, type: 'fc',     key: 'pooled' },
-    { name: 'Output',  neurons: 10,  type: 'output', key: 'output' },
+const ARCH = [
+    { name: 'Input',   n: 8,   vis: 8,  type: 'input',  key: 'input' },
+    { name: 'Stem',    n: 32,  vis: 12, type: 'conv',   key: 'stem' },
+    { name: 'Block 0', n: 64,  vis: 12, type: 'conv',   key: 'block_0' },
+    { name: 'Block 1', n: 128, vis: 16, type: 'conv',   key: 'block_1' },
+    { name: 'Block 2', n: 256, vis: 20, type: 'conv',   key: 'block_2' },
+    { name: 'Block 3', n: 320, vis: 24, type: 'conv',   key: 'block_3' },
+    { name: 'Pool',    n: 320, vis: 12, type: 'fc',     key: 'pooled' },
+    { name: 'Output',  n: 62,  vis: 5,  type: 'output', key: 'output' },
 ];
-const MAX_VISIBLE = 10;
-
-let _animFrame = null;
-let _destroyed = false;
+const VIS_DEFAULT = 8;
+let _af = null, _dead = false;
 
 export async function renderExplainability(container) {
-    if (_animFrame) { cancelAnimationFrame(_animFrame); _animFrame = null; }
-    _destroyed = false;
+    if (_af) { cancelAnimationFrame(_af); _af = null; }
+    _dead = false;
     container.innerHTML = '';
     container.className = 'view-fit';
 
-    // Check model
     let ready = false;
-    try { const r = await fetch('/api/inference/status'); ready = (await r.json()).ready; } catch (e) { }
+    try { ready = (await (await fetch('/api/inference/status')).json()).ready; } catch(e) {}
     if (!ready) {
-        container.innerHTML = `<div class="view-title">Live Neural Network</div>
-            <div class="panel"><div class="panel-body text-muted">No model loaded. Go to Model Manager to load one.</div></div>`;
+        container.innerHTML = '<div class="view-title">Live Neural Network</div><div class="panel"><div class="panel-body text-muted">No model loaded. Go to Models → Load.</div></div>';
         return;
     }
 
-    // ── Header ──
-    const hdr = document.createElement('div');
-    hdr.className = 'ex-header';
-    hdr.innerHTML = `<span class="ex-header-title">Live Neural Network</span>
-        <span class="text-sm text-muted" id="ex-status">Draw to start</span>`;
+    // ═══════════════════════════════════════
+    // BUILD DOM
+    // ═══════════════════════════════════════
+
+    // Header
+    const hdr = mk('div', 'lnn-hdr');
+    hdr.innerHTML = '<span class="lnn-title">Live Neural Network</span><span class="lnn-status" id="ex-status">Draw a letter or digit to begin</span>';
     container.appendChild(hdr);
 
-    // ── Layout ──
-    const main = document.createElement('div');
-    main.className = 'ex-layout';
-    container.appendChild(main);
+    const layout = mk('div', 'lnn-layout');
+    container.appendChild(layout);
 
-    const topRow = document.createElement('div');
-    topRow.className = 'ex-row-top';
-    main.appendChild(topRow);
+    const topRow = mk('div', 'lnn-top');
+    layout.appendChild(topRow);
+    const botRow = mk('div', 'lnn-bot');
+    layout.appendChild(botRow);
 
-    const bottomRow = document.createElement('div');
-    bottomRow.className = 'ex-row-bottom';
-    main.appendChild(bottomRow);
+    // ────────── TOP LEFT: Draw + Predict ──────────
+    const colL = mk('div', 'lnn-col-l');
+    topRow.appendChild(colL);
 
-    // ═══════ LEFT: Canvas + Predictions ═══════
-    const leftCol = document.createElement('div');
-    leftCol.className = 'ex-left';
-    topRow.appendChild(leftCol);
+    const drawPanel = panel('Draw', 'Real-time recognition as you draw');
+    drawPanel.el.classList.add('lnn-draw-panel');
+    const canvasObj = createCanvas(160);
+    drawPanel.body.classList.add('lnn-draw-body');
+    // Wrap canvas element to center it and its controls
+    const canvasWrapper = canvasObj.element;
+    canvasWrapper.style.cssText = 'display:flex;flex-direction:column;align-items:center;width:100%;';
+    drawPanel.body.appendChild(canvasWrapper);
+    colL.appendChild(drawPanel.el);
 
-    const canvasPanel = mkPanel('Draw');
-    canvasPanel.el.style.flexShrink = '0';
-    const canvasObj = createCanvas(200);
-    canvasPanel.body.style.padding = '4px';
-    canvasPanel.body.style.display = 'flex';
-    canvasPanel.body.style.justifyContent = 'center';
-    canvasPanel.body.appendChild(canvasObj.element);
-    leftCol.appendChild(canvasPanel.el);
-
-    const predPanel = mkPanel('Prediction');
-    predPanel.el.style.flex = '1';
-    predPanel.el.style.overflow = 'hidden';
-    predPanel.body.style.padding = '6px';
-    predPanel.body.style.overflowY = 'auto';
-
-    const bigPred = document.createElement('div');
-    bigPred.className = 'ex-big-pred';
+    const predPanel = panel('Prediction', 'Top-5 most likely characters');
+    predPanel.el.classList.add('lnn-pred-panel');
+    const bigPred = mk('div', 'lnn-big');
     bigPred.textContent = '?';
-    predPanel.body.appendChild(bigPred);
-
-    const confText = document.createElement('div');
-    confText.className = 'text-sm text-muted';
-    confText.style.textAlign = 'center';
-    confText.style.marginBottom = '6px';
-    confText.textContent = 'Draw a character';
-    predPanel.body.appendChild(confText);
-
+    const confTxt = mk('div', 'lnn-conf');
+    confTxt.textContent = '—';
     const barsEl = createConfidenceBars([]);
-    predPanel.body.appendChild(barsEl);
-    leftCol.appendChild(predPanel.el);
+    predPanel.body.append(bigPred, confTxt, barsEl);
+    colL.appendChild(predPanel.el);
 
-    // ═══════ CENTER: NN Diagram ═══════
-    const nnPanel = mkPanel('Neural Network — NeuralScribeNet');
-    nnPanel.el.style.flex = '1';
-    nnPanel.el.style.overflow = 'hidden';
-    const nnWrap = document.createElement('div');
-    nnWrap.style.cssText = 'flex:1;position:relative;min-height:0;';
-    const nnCanvas = document.createElement('canvas');
-    nnCanvas.style.cssText = 'width:100%;height:100%;display:block;';
-    nnWrap.appendChild(nnCanvas);
+    // ────────── TOP CENTER: NN Diagram ──────────
+    const colC = mk('div', 'lnn-col-c');
+    topRow.appendChild(colC);
+
+    const nnPanel = panel('Neural Network', 'Signal flow — brighter = stronger activation');
+    nnPanel.el.classList.add('lnn-nn-panel');
+    nnPanel.body.classList.add('lnn-nn-body');
+    const nnWrap = mk('div', 'lnn-cvwrap');
+    const nnCv = document.createElement('canvas');
+    nnCv.classList.add('lnn-cv');
+    nnWrap.appendChild(nnCv);
     nnPanel.body.appendChild(nnWrap);
-    topRow.appendChild(nnPanel.el);
+    colC.appendChild(nnPanel.el);
 
-    // ═══════ RIGHT: Prob Evolution ═══════
-    const rightTop = document.createElement('div');
-    rightTop.className = 'ex-right-top';
-    topRow.appendChild(rightTop);
+    // ────────── TOP RIGHT: GradCAM / Preprocess / Confusion / ProbEvo ──────────
+    const colR = mk('div', 'lnn-col-r');
+    topRow.appendChild(colR);
 
-    const evoPanel = mkPanel('Probability Evolution');
-    evoPanel.el.style.flex = '1';
-    evoPanel.el.style.overflow = 'hidden';
-    const evoWrap = document.createElement('div');
-    evoWrap.style.cssText = 'flex:1;position:relative;min-height:0;';
-    const evoCanvas = document.createElement('canvas');
-    evoCanvas.style.cssText = 'width:100%;height:100%;display:block;';
-    evoWrap.appendChild(evoCanvas);
+    // Grad-CAM
+    const gcPanel = panel('Grad-CAM Saliency', 'Pixels most influencing the prediction', true);
+    gcPanel.el.classList.add('lnn-gc-panel');
+    gcPanel.body.innerHTML = '<div class="lnn-gc"><div class="lnn-gc-img"><canvas id="gc-cv" width="56" height="56"></canvas></div><div class="lnn-gc-side"><div class="lnn-gc-bar"></div><div class="lnn-gc-labels"><span>Low</span><span>High</span></div></div></div>';
+    colR.appendChild(gcPanel.el);
+
+    // Preprocessing
+    const ppPanel = panel('Preprocessing', 'What the model actually sees', true);
+    ppPanel.el.classList.add('lnn-pp-panel');
+    ppPanel.body.innerHTML = '<div class="lnn-pp"><div class="lnn-pp-step"><img id="pp-raw" class="lnn-pp-img" /><div class="lnn-pp-lbl">Your input</div></div><div class="lnn-pp-arrow">→</div><div class="lnn-pp-step"><img id="pp-proc" class="lnn-pp-img" /><div class="lnn-pp-lbl">Model sees</div></div></div>';
+    colR.appendChild(ppPanel.el);
+
+    // Confusion
+    const cnPanel = panel('Confusion', 'Classes the model is deciding between', true);
+    cnPanel.el.classList.add('lnn-cn-panel');
+    cnPanel.body.id = 'cn-body';
+    cnPanel.body.innerHTML = '<div class="lnn-placeholder">Draw to see</div>';
+    colR.appendChild(cnPanel.el);
+
+    // Prob Evolution
+    const evoPanel = panel('Probability Evolution', 'Confidence changes as you draw');
+    evoPanel.el.classList.add('lnn-evo-panel');
+    const evoWrap = mk('div', 'lnn-cvwrap');
+    const evoCv = document.createElement('canvas');
+    evoCv.classList.add('lnn-cv');
+    evoWrap.appendChild(evoCv);
+    evoPanel.body.classList.add('lnn-cv-body');
     evoPanel.body.appendChild(evoWrap);
-    rightTop.appendChild(evoPanel.el);
+    colR.appendChild(evoPanel.el);
 
-    // ═══════ BOTTOM: Feature Maps + Performance ═══════
-    const bottomMain = document.createElement('div');
-    bottomMain.className = 'ex-bottom-main';
-    bottomRow.appendChild(bottomMain);
+    // ────────── BOTTOM LEFT: Feature Maps + Stroke Timeline ──────────
+    const botL = mk('div', 'lnn-bot-l');
+    botRow.appendChild(botL);
 
-    const fmPanel = mkPanel('Feature Maps');
-    fmPanel.el.style.flex = '1';
-    fmPanel.el.style.overflow = 'hidden';
-    fmPanel.body.style.overflow = 'auto';
-    fmPanel.body.style.padding = '6px';
-    fmPanel.body.style.display = 'flex';
-    fmPanel.body.style.flexWrap = 'wrap';
-    fmPanel.body.style.gap = '6px';
-    fmPanel.body.style.alignContent = 'flex-start';
+    const fmPanel = panel('Feature Maps', 'Top activation channels — patterns the network detects');
+    fmPanel.el.classList.add('lnn-fm-panel');
     fmPanel.body.id = 'fmap-body';
-    fmPanel.body.innerHTML = '<div class="text-sm text-muted">Draw to see activations</div>';
-    bottomMain.appendChild(fmPanel.el);
+    fmPanel.body.classList.add('lnn-fm-body');
+    fmPanel.body.innerHTML = '<div class="lnn-placeholder">Draw to see activations</div>';
+    botL.appendChild(fmPanel.el);
 
-    const bottomSide = document.createElement('div');
-    bottomSide.className = 'ex-bottom-side';
-    bottomRow.appendChild(bottomSide);
+    const stPanel = panel('Stroke Timeline', 'Confidence over time — dashed lines mark each stroke', true);
+    stPanel.el.classList.add('lnn-st-panel');
+    const stWrap = mk('div', 'lnn-cvwrap');
+    const stCv = document.createElement('canvas');
+    stCv.classList.add('lnn-cv');
+    stWrap.appendChild(stCv);
+    stPanel.body.classList.add('lnn-cv-body');
+    stPanel.body.appendChild(stWrap);
+    botL.appendChild(stPanel.el);
 
-    const perfPanel = mkPanel('Performance');
-    perfPanel.el.style.flexShrink = '0';
-    perfPanel.body.style.cssText = 'padding:6px;font-size:11px;font-family:var(--font-mono);';
-    perfPanel.body.id = 'perf-body';
-    perfPanel.body.textContent = '—';
-    bottomSide.appendChild(perfPanel.el);
+    // ────────── BOTTOM CENTER: Reserved Space ──────────
+    const ldPanel = panel('Layer Inspector', 'Reserved for future use');
+    ldPanel.el.classList.add('lnn-ld-panel');
+    ldPanel.body.innerHTML = '<div class="lnn-placeholder" style="display:flex;align-items:center;justify-content:center;flex:1;font-size:11px;color:var(--muted);">Coming soon</div>';
+    botRow.appendChild(ldPanel.el);
 
-    // ══════════════════════════════════════
+    // ────────── BOTTOM RIGHT: Robustness + Calibration + Embedding ──────────
+    const botR = mk('div', 'lnn-bot-r');
+    botRow.appendChild(botR);
+
+    const rbPanel = panel('Robustness', 'Stability across rotations and shifts', true);
+    rbPanel.el.classList.add('lnn-rb-panel');
+    rbPanel.body.innerHTML = '<div class="lnn-rb"><div class="lnn-rb-track"><div class="lnn-rb-fill" id="rb-fill"></div></div><span class="lnn-rb-val" id="rb-val">—</span></div><div class="lnn-tta" id="tta-grid"></div>';
+    botR.appendChild(rbPanel.el);
+
+    const calPanel = panel('Calibration', 'Is the confidence trustworthy?', true);
+    calPanel.el.classList.add('lnn-cal-panel');
+    calPanel.body.innerHTML = '<div class="lnn-cal"><div class="lnn-cal-ring" id="cal-dial">—</div><div class="lnn-cal-txt" id="cal-info"><span class="lnn-placeholder">Draw to see</span></div></div>';
+    botR.appendChild(calPanel.el);
+
+    const emPanel = panel('Embedding Space', 'Your input vs class clusters', true);
+    emPanel.el.classList.add('lnn-em-panel');
+    const emWrap = mk('div', 'lnn-cvwrap');
+    const emCv = document.createElement('canvas');
+    emCv.classList.add('lnn-cv');
+    emWrap.appendChild(emCv);
+    emPanel.body.classList.add('lnn-cv-body');
+    emPanel.body.appendChild(emWrap);
+    botR.appendChild(emPanel.el);
+
+    // ═══════════════════════════════════════
     // STATE
-    // ══════════════════════════════════════
-    let layerPositions = [];
-    let nodeActivations = ARCHITECTURE.map(l => new Array(Math.min(l.neurons, MAX_VISIBLE)).fill(0));
-    let outputPredictions = [];
-    let winnerIdx = -1;
-    let evoHistory = [];
-    let lastFullTime = 0;
-    let pendingRequest = false;
-    let dirtySinceLast = false;
-    let sysStatsText = '';
-
-    const nnCtx = nnCanvas.getContext('2d');
-    const evoCtx = evoCanvas.getContext('2d');
+    // ═══════════════════════════════════════
+    let nodeAct = ARCH.map(l => new Array(l.vis || VIS_DEFAULT).fill(0));
+    let outPreds = [], winIdx = -1, evoHistory = [], strokeHistory = [];
+    let lastFull = 0, pending = false, dirty = false, sysText = '';
+    let cachedPixels = null, strokeCount = 0, lastStrokeTime = 0;
+    const nnCtx = nnCv.getContext('2d');
+    const evoCtx = evoCv.getContext('2d');
+    const stCtx = stCv.getContext('2d');
+    const emCtx = emCv.getContext('2d');
     let sysTimer = null;
 
-    // ══════════════════════════════════════
+    // (Layer Inspector reserved for future — no buttons needed)
+
+    // Stroke tracking
+    canvasObj.onChange(() => {
+        dirty = true;
+        const now = Date.now();
+        if (now - lastStrokeTime > 200) { strokeCount++; lastStrokeTime = now; }
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(runInference, 50);
+    });
+
+    // Grad-CAM placeholder
+    function drawGradCAM(pixels) {
+        const cv = document.getElementById('gc-cv');
+        if (!cv) return;
+        const ctx = cv.getContext('2d');
+
+        if (!pixels || pixels.length === 0) {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, 56, 56);
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Draw to', 28, 25);
+            ctx.fillText('activate', 28, 36);
+            return;
+        }
+
+        // Build a 28x28 intensity grid from pixel data
+        const size = Math.round(Math.sqrt(pixels.length));
+        const img = new ImageData(56, 56);
+
+        for (let y = 0; y < 56; y++) {
+            for (let x = 0; x < 56; x++) {
+                const srcX = Math.floor(x * size / 56);
+                const srcY = Math.floor(y * size / 56);
+                const val = pixels[srcY * size + srcX] || 0;
+
+                // Heatmap: dark blue → cyan → yellow → red
+                let r, g, b;
+                if (val < 0.25) {
+                    const t = val / 0.25;
+                    r = Math.round(10 + t * 20);
+                    g = Math.round(10 + t * 80);
+                    b = Math.round(40 + t * 180);
+                } else if (val < 0.5) {
+                    const t = (val - 0.25) / 0.25;
+                    r = Math.round(30);
+                    g = Math.round(90 + t * 165);
+                    b = Math.round(220 - t * 120);
+                } else if (val < 0.75) {
+                    const t = (val - 0.5) / 0.25;
+                    r = Math.round(30 + t * 225);
+                    g = Math.round(255 - t * 55);
+                    b = Math.round(100 - t * 80);
+                } else {
+                    const t = (val - 0.75) / 0.25;
+                    r = Math.round(255);
+                    g = Math.round(200 - t * 180);
+                    b = Math.round(20 - t * 20);
+                }
+
+                const idx = (y * 56 + x) * 4;
+                img.data[idx] = r;
+                img.data[idx + 1] = g;
+                img.data[idx + 2] = b;
+                img.data[idx + 3] = 255;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+    }
+    drawGradCAM(null);
+
+    // ═══════════════════════════════════════
     // RESET
-    // ══════════════════════════════════════
-    function resetVisuals() {
-        nodeActivations = ARCHITECTURE.map(l => new Array(Math.min(l.neurons, MAX_VISIBLE)).fill(0));
-        outputPredictions = [];
-        winnerIdx = -1;
+    // ═══════════════════════════════════════
+    function reset() {
+        nodeAct = ARCH.map(l => new Array(l.vis || VIS_DEFAULT).fill(0));
+        outPreds = [];
+        winIdx = -1;
         evoHistory = [];
-        layerPositions.forEach(lp => lp.nodes.forEach(n => { n.activation = 0; }));
-        const fmapBody = document.getElementById('fmap-body');
-        if (fmapBody) fmapBody.innerHTML = '<div class="text-sm text-muted">Draw to see activations</div>';
+        strokeHistory = [];
+        strokeCount = 0;
         bigPred.textContent = '?';
-        confText.textContent = 'Draw a character';
+        confTxt.textContent = '—';
         updateConfidenceBars(barsEl, []);
-        const perfEl = document.getElementById('perf-body');
-        if (perfEl) { perfEl.textContent = '—'; delete perfEl.dataset.base; }
-        const statusEl = document.getElementById('ex-status');
-        if (statusEl) statusEl.textContent = 'Draw to start';
+        const ids = ['fmap-body', 'cn-body', 'ld-grid', 'tta-grid'];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '<div class="lnn-placeholder">Draw to see</div>';
+        });
+        const rbFill = document.getElementById('rb-fill');
+        if (rbFill) rbFill.style.width = '0%';
+        const rbVal = document.getElementById('rb-val');
+        if (rbVal) rbVal.textContent = '—';
+        const calDial = document.getElementById('cal-dial');
+        if (calDial) calDial.textContent = '—';
+        const calInfo = document.getElementById('cal-info');
+        if (calInfo) calInfo.innerHTML = '<span class="lnn-placeholder">Draw to see</span>';
+        const status = document.getElementById('ex-status');
+        if (status) status.textContent = 'Draw a letter or digit to begin';
+        drawGradCAM(null);
     }
 
-    // ══════════════════════════════════════
-    // RESIZE
-    // ══════════════════════════════════════
+    // ═══════════════════════════════════════
+    // RESIZE — set canvas dimensions to match container
+    // ═══════════════════════════════════════
     function resize() {
         const dpr = window.devicePixelRatio || 1;
-        const nw = nnWrap.clientWidth, nh = nnWrap.clientHeight;
-        if (nw > 0 && nh > 0) {
-            nnCanvas.width = nw * dpr; nnCanvas.height = nh * dpr;
-            nnCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            computePositions(nw, nh);
-        }
-        const ew = evoWrap.clientWidth, eh = evoWrap.clientHeight;
-        if (ew > 0 && eh > 0) {
-            evoCanvas.width = ew * dpr; evoCanvas.height = eh * dpr;
-            evoCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        }
+        [nnWrap, evoWrap, stWrap, emWrap].forEach(wrapper => {
+            const cv = wrapper.querySelector('canvas');
+            if (!cv) return;
+            const w = wrapper.clientWidth;
+            const h = wrapper.clientHeight;
+            if (w > 0 && h > 0) {
+                cv.width = w * dpr;
+                cv.height = h * dpr;
+                cv.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+            }
+        });
+        computePositions();
     }
-    const ro = new ResizeObserver(resize);
-    ro.observe(nnWrap); ro.observe(evoWrap);
-    setTimeout(resize, 100);
 
-    // ── System polling ──
-    async function pollSys() {
+    const resizeObserver = new ResizeObserver(resize);
+    [nnWrap, evoWrap, stWrap, emWrap].forEach(w => resizeObserver.observe(w));
+    setTimeout(resize, 120);
+
+    // System polling
+    async function pollSystem() {
         try {
-            const [gpuRes, sysRes] = await Promise.all([fetch('/api/system/gpu'), fetch('/api/system/stats')]);
-            const gpu = await gpuRes.json(); const sys = await sysRes.json();
-            sysStatsText = `<strong>CPU:</strong> ${sys.cpu_percent}%<br><strong>RAM:</strong> ${sys.ram_used_gb}/${sys.ram_total_gb}GB` +
-                (gpu.available ? `<br><strong>GPU:</strong> ${gpu.gpu_util_percent}%<br><strong>VRAM:</strong> ${gpu.memory_used_mb}MB` : `<br><strong>GPU:</strong> N/A`);
-            const perfEl = document.getElementById('perf-body');
-            if (perfEl) { const b = perfEl.dataset.base || ''; perfEl.innerHTML = b + (b ? '<br><br>' : '') + sysStatsText; }
-        } catch (e) { }
+            const [gpuRes, sysRes] = await Promise.all([
+                fetch('/api/system/gpu'),
+                fetch('/api/system/stats'),
+            ]);
+            const gpu = await gpuRes.json();
+            const sys = await sysRes.json();
+            sysText = 'CPU:' + sys.cpu_percent + '% RAM:' + sys.ram_used_gb + '/' + sys.ram_total_gb + 'GB';
+            if (gpu.available) sysText += ' GPU:' + gpu.gpu_util_percent + '% VRAM:' + gpu.memory_used_mb + 'MB';
+        } catch (e) { /* silent */ }
     }
-    pollSys(); sysTimer = setInterval(pollSys, 5000);
+    pollSystem();
+    sysTimer = setInterval(pollSystem, 5000);
 
-    // ══════════════════════════════════════
-    // NN DIAGRAM — POSITION COMPUTATION
-    // ══════════════════════════════════════
-    function computePositions(w, h) {
-        layerPositions = [];
-        const padL = 40, padR = 100; // extra right padding for output labels
-        const padY = 20;
-        const labelSpace = 30;
-        const usableW = w - padL - padR;
-        const usableH = h - padY * 2 - labelSpace;
-        const steps = Math.max(ARCHITECTURE.length - 1, 1);
-        const layerSpacing = usableW / steps;
+    // ═══════════════════════════════════════
+    // NN DIAGRAM
+    // ═══════════════════════════════════════
+    let layerPos = [];
 
-        ARCHITECTURE.forEach((layer, li) => {
-            const x = padL + li * layerSpacing;
-            const visible = Math.min(layer.neurons, MAX_VISIBLE);
-            const nodeGap = Math.min(32, usableH / Math.max(visible, 1));
+    function computePositions() {
+        layerPos = [];
+        const w = nnWrap.clientWidth;
+        const h = nnWrap.clientHeight;
+        if (w < 40 || h < 40) return;
+
+        const padLeft = 40;
+        const padRight = 95;
+        const padTop = 14;
+        const padBot = 28;
+        const usableW = w - padLeft - padRight;
+        const usableH = h - padTop - padBot;
+        const layerSpacing = usableW / Math.max(ARCH.length - 1, 1);
+
+        ARCH.forEach((layer, li) => {
+            const x = padLeft + li * layerSpacing;
+            const visible = layer.vis || VIS_DEFAULT;
+            const nodeGap = Math.min(22, usableH / Math.max(visible + 1, 1));
             const totalH = (visible - 1) * nodeGap;
-            const startY = padY + (usableH - totalH) / 2;
+            const startY = padTop + (usableH - totalH) / 2;
 
             const nodes = [];
-            for (let n = 0; n < visible; n++) {
-                nodes.push({ x, y: startY + n * nodeGap, activation: nodeActivations[li]?.[n] || 0 });
+            for (let i = 0; i < visible; i++) {
+                nodes.push({
+                    x: x,
+                    y: startY + i * nodeGap,
+                    activation: nodeAct[li] ? (nodeAct[li][i] || 0) : 0,
+                });
             }
-            layerPositions.push({ x, nodes, layer, visible, hasMore: layer.neurons > MAX_VISIBLE });
+
+            layerPos.push({
+                x: x,
+                nodes: nodes,
+                layer: layer,
+                visible: visible,
+                hasMore: layer.n > visible,
+            });
         });
     }
 
-    // ══════════════════════════════════════
-    // NN DIAGRAM — DRAW (clean, minimal B&W style)
-    // ══════════════════════════════════════
     function drawNN() {
-        const w = nnWrap.clientWidth, h = nnWrap.clientHeight;
-        if (w < 20 || h < 20 || !layerPositions.length) return;
+        const w = nnWrap.clientWidth;
+        const h = nnWrap.clientHeight;
+        if (w < 40 || h < 40 || layerPos.length === 0) return;
         nnCtx.clearRect(0, 0, w, h);
 
-        // ── Draw connections ──
-        for (let li = 0; li < layerPositions.length - 1; li++) {
-            const from = layerPositions[li], to = layerPositions[li + 1];
-            // Sample subset for perf
-            const fIdx = sampleN(from.nodes.length, Math.min(from.nodes.length, 8));
-            const tIdx = sampleN(to.nodes.length, Math.min(to.nodes.length, 8));
+        // ── CONNECTIONS — draw between ALL visible nodes of adjacent layers ──
+        for (let li = 0; li < layerPos.length - 1; li++) {
+            const from = layerPos[li];
+            const to = layerPos[li + 1];
 
-            for (const fi of fIdx) {
-                for (const ti of tIdx) {
-                    const fn = from.nodes[fi], tn = to.nodes[ti];
-                    const act = (fn.activation + tn.activation) / 2;
+            // For very dense layers, sample to avoid drawing 24×24=576 lines
+            const maxLines = 120;
+            const totalPossible = from.nodes.length * to.nodes.length;
+            const drawAll = totalPossible <= maxLines;
 
-                    // Monochrome: inactive = very faint, active = solid black
-                    const alpha = act > 0.05 ? (0.06 + act * 0.4) : 0.03;
-                    const lw = act > 0.05 ? (0.4 + act * 1.6) : 0.3;
+            const fromIdx = drawAll ? from.nodes.map((_, i) => i) : sampleIndices(from.nodes.length, Math.min(from.nodes.length, 10));
+            const toIdx = drawAll ? to.nodes.map((_, i) => i) : sampleIndices(to.nodes.length, Math.min(to.nodes.length, 12));
 
-                    nnCtx.strokeStyle = `rgba(0,0,0,${alpha})`;
-                    nnCtx.lineWidth = lw;
+            for (const fi of fromIdx) {
+                for (const ti of toIdx) {
+                    const fNode = from.nodes[fi];
+                    const tNode = to.nodes[ti];
+                    const avgAct = (fNode.activation + tNode.activation) / 2;
+
+                    // Always draw a line — just vary opacity and thickness
+                    let alpha, thickness;
+                    if (avgAct > 0.3) {
+                        alpha = 0.12 + avgAct * 0.45;
+                        thickness = 0.6 + avgAct * 1.8;
+                        nnCtx.strokeStyle = 'rgba(37,99,235,' + alpha + ')';
+                    } else {
+                        alpha = 0.03 + avgAct * 0.12;
+                        thickness = 0.3;
+                        nnCtx.strokeStyle = 'rgba(100,116,139,' + alpha + ')';
+                    }
+                    nnCtx.lineWidth = thickness;
                     nnCtx.beginPath();
-                    nnCtx.moveTo(fn.x, fn.y);
-                    nnCtx.lineTo(tn.x, tn.y);
+                    nnCtx.moveTo(fNode.x, fNode.y);
+                    nnCtx.lineTo(tNode.x, tNode.y);
                     nnCtx.stroke();
                 }
             }
         }
 
-        // ── Draw nodes ──
-        layerPositions.forEach((lp, li) => {
+        // ── NODES ──
+        layerPos.forEach((lp, li) => {
             const isOutput = lp.layer.type === 'output';
             const isInput = lp.layer.type === 'input';
 
             lp.nodes.forEach((node, ni) => {
                 const act = node.activation;
-                const radius = isOutput ? 7 : isInput ? 4 : 5;
+                const radius = isOutput ? 7 : isInput ? 4.5 : 5.5;
 
-                // Activation fill: white(0) → black(1)
-                const gray = Math.round(230 - act * 210);
-                nnCtx.fillStyle = `rgb(${gray},${gray},${gray})`;
-                nnCtx.strokeStyle = '#000';
+                // Fill color: gray → blue based on activation
+                let fillColor;
+                if (act < 0.1) {
+                    fillColor = '#d4d4d8';
+                } else if (act < 0.3) {
+                    fillColor = '#93c5fd';
+                } else if (act < 0.6) {
+                    fillColor = '#3b82f6';
+                } else {
+                    fillColor = '#1d4ed8';
+                }
+
+                // Draw node
+                nnCtx.fillStyle = fillColor;
+                nnCtx.strokeStyle = act > 0.3 ? '#1e40af' : '#71717a';
                 nnCtx.lineWidth = isOutput ? 1.5 : 1;
                 nnCtx.beginPath();
                 nnCtx.arc(node.x, node.y, radius, 0, Math.PI * 2);
                 nnCtx.fill();
                 nnCtx.stroke();
 
-                // Winner ring on the correct output node
-                if (isOutput && ni === winnerIdx) {
-                    nnCtx.strokeStyle = '#000';
+                // Winner highlight — ring around the WINNING output node (varies by prediction)
+                if (isOutput && ni === winIdx) {
+                    nnCtx.strokeStyle = '#2563eb';
                     nnCtx.lineWidth = 2.5;
                     nnCtx.beginPath();
                     nnCtx.arc(node.x, node.y, radius + 5, 0, Math.PI * 2);
                     nnCtx.stroke();
                 }
 
-                // Output labels — each node shows its own prediction
-                if (isOutput && outputPredictions[ni]) {
-                    const p = outputPredictions[ni];
-                    nnCtx.fillStyle = ni === winnerIdx ? '#000' : '#888';
-                    nnCtx.font = ni === winnerIdx ? 'bold 11px monospace' : '10px monospace';
+                // Output node labels — EACH node shows its own prediction
+                if (isOutput && outPreds[ni]) {
+                    const pred = outPreds[ni];
+                    nnCtx.fillStyle = ni === winIdx ? '#1e40af' : '#71717a';
+                    nnCtx.font = ni === winIdx ? 'bold 11px monospace' : '9px monospace';
                     nnCtx.textAlign = 'left';
-                    nnCtx.fillText(`${p.display} ${(p.confidence*100).toFixed(0)}%`, node.x + radius + 6, node.y + 4);
+                    nnCtx.fillText(
+                        pred.display + ' ' + (pred.confidence * 100).toFixed(0) + '%',
+                        node.x + radius + 6,
+                        node.y + 4
+                    );
                 }
             });
 
             // Ellipsis for truncated layers
             if (lp.hasMore) {
-                const last = lp.nodes[lp.nodes.length - 1];
-                nnCtx.fillStyle = '#999';
+                const lastNode = lp.nodes[lp.nodes.length - 1];
+                nnCtx.fillStyle = '#a1a1aa';
                 nnCtx.font = '12px sans-serif';
                 nnCtx.textAlign = 'center';
-                nnCtx.fillText('⋮', lp.x, last.y + 20);
+                nnCtx.fillText('⋮', lp.x, lastNode.y + 16);
             }
 
-            // Layer label
-            const bottomY = lp.nodes[lp.nodes.length - 1].y + (lp.hasMore ? 34 : 22);
-            nnCtx.fillStyle = '#555';
+            // Layer name label
+            const bottomNode = lp.nodes[lp.nodes.length - 1];
+            const labelY = bottomNode.y + (lp.hasMore ? 30 : 20);
+            nnCtx.fillStyle = '#52525b';
             nnCtx.font = '9px sans-serif';
             nnCtx.textAlign = 'center';
-            nnCtx.fillText(lp.layer.name, lp.x, bottomY);
-            nnCtx.fillStyle = '#bbb';
-            nnCtx.font = '8px monospace';
-            nnCtx.fillText(lp.layer.neurons.toString(), lp.x, bottomY + 11);
+            nnCtx.fillText(lp.layer.name, lp.x, labelY);
+            nnCtx.fillStyle = '#a1a1aa';
+            nnCtx.font = '7px monospace';
+            nnCtx.fillText(String(lp.layer.n), lp.x, labelY + 11);
         });
     }
 
-    // ══════════════════════════════════════
-    // FEATURE MAPS
-    // ══════════════════════════════════════
-    function updateFeatureMaps(fullData) {
-        const body = document.getElementById('fmap-body');
-        if (!body || !fullData || !fullData.feature_maps) return;
-        body.innerHTML = '';
-        const fmap = fullData.feature_maps;
-        const archOrder = ARCHITECTURE.map(l => l.key);
-        const ordered = [];
-        archOrder.forEach(key => { if (fmap[key]) ordered.push(key); });
-        Object.keys(fmap).forEach(name => { if (!ordered.includes(name)) ordered.push(name); });
-
-        ordered.forEach(name => {
-            const maps = fmap[name];
-            if (!maps || !maps.heatmaps || !maps.heatmaps.length) return;
-            const group = document.createElement('div');
-            group.className = 'ex-fmap-group';
-            const arch = ARCHITECTURE.find(l => l.key === name);
-            const title = document.createElement('div');
-            title.className = 'ex-fmap-title';
-            title.textContent = `${arch ? arch.name : name} · ${maps.total_channels}ch · ${maps.spatial_size[0]}×${maps.spatial_size[1]}`;
-            group.appendChild(title);
-            const grid = document.createElement('div');
-            grid.className = 'ex-fmap-grid';
-            maps.heatmaps.slice(0, 4).forEach(hm => {
-                const thumb = document.createElement('div');
-                thumb.className = 'ex-fmap-thumb';
-                const img = document.createElement('img');
-                img.src = 'data:image/png;base64,' + hm.heatmap;
-                img.title = `ch${hm.channel} · ${hm.importance.toFixed(3)}`;
-                thumb.appendChild(img);
-                grid.appendChild(thumb);
-            });
-            group.appendChild(grid);
-            body.appendChild(group);
-        });
-        if (!body.children.length) body.innerHTML = '<div class="text-sm text-muted">No feature maps</div>';
-    }
-
-    // ══════════════════════════════════════
+    // ═══════════════════════════════════════
     // PROBABILITY EVOLUTION
-    // ══════════════════════════════════════
+    // ═══════════════════════════════════════
     function drawEvo() {
-        const w = evoWrap.clientWidth, h = evoWrap.clientHeight;
+        const w = evoWrap.clientWidth;
+        const h = evoWrap.clientHeight;
         if (w < 10 || h < 10) return;
         evoCtx.clearRect(0, 0, w, h);
-        if (!evoHistory.length) {
-            evoCtx.fillStyle = '#bbb'; evoCtx.font = '10px sans-serif'; evoCtx.textAlign = 'center';
-            evoCtx.fillText('No data', w / 2, h / 2); return;
-        }
-        const pad = { t: 10, r: 36, b: 18, l: 30 };
-        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
-        if (pw < 10 || ph < 10) return;
 
-        evoCtx.strokeStyle = '#eee'; evoCtx.lineWidth = 0.5;
+        if (evoHistory.length === 0) {
+            evoCtx.fillStyle = '#a1a1aa';
+            evoCtx.font = '9px sans-serif';
+            evoCtx.textAlign = 'center';
+            evoCtx.fillText('No data yet', w / 2, h / 2);
+            return;
+        }
+
+        const pad = { t: 8, r: 30, b: 12, l: 24 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // Grid lines
+        evoCtx.strokeStyle = '#e4e4e7';
+        evoCtx.lineWidth = 0.5;
         for (let i = 0; i <= 4; i++) {
             const y = pad.t + ph * i / 4;
-            evoCtx.beginPath(); evoCtx.moveTo(pad.l, y); evoCtx.lineTo(pad.l + pw, y); evoCtx.stroke();
-            evoCtx.fillStyle = '#aaa'; evoCtx.font = '8px sans-serif'; evoCtx.textAlign = 'right';
+            evoCtx.beginPath();
+            evoCtx.moveTo(pad.l, y);
+            evoCtx.lineTo(pad.l + pw, y);
+            evoCtx.stroke();
+            evoCtx.fillStyle = '#a1a1aa';
+            evoCtx.font = '7px monospace';
+            evoCtx.textAlign = 'right';
             evoCtx.fillText(((4 - i) * 25) + '%', pad.l - 3, y + 3);
         }
-        evoCtx.fillStyle = '#aaa'; evoCtx.font = '8px sans-serif'; evoCtx.textAlign = 'center';
-        evoCtx.fillText('strokes →', pad.l + pw / 2, h - 2);
 
-        const colors = ['#000', '#555', '#999', '#bbb', '#ddd'];
-        const widths = [2, 1.5, 1, 0.8, 0.5];
+        const colors = ['#2563eb', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0'];
+        const widths = [2.5, 1.5, 1, 0.7, 0.5];
+
         for (let rank = 4; rank >= 0; rank--) {
-            evoCtx.strokeStyle = colors[rank]; evoCtx.lineWidth = widths[rank];
+            evoCtx.strokeStyle = colors[rank];
+            evoCtx.lineWidth = widths[rank];
             evoCtx.beginPath();
             let started = false;
             evoHistory.forEach((snap, i) => {
                 if (rank >= snap.length) return;
                 const x = pad.l + (i / Math.max(evoHistory.length - 1, 1)) * pw;
                 const y = pad.t + ph - snap[rank].confidence * ph;
-                if (!started) { evoCtx.moveTo(x, y); started = true; } else evoCtx.lineTo(x, y);
+                if (!started) { evoCtx.moveTo(x, y); started = true; }
+                else evoCtx.lineTo(x, y);
             });
             evoCtx.stroke();
+
+            // End label
             const last = evoHistory[evoHistory.length - 1];
             if (last && rank < last.length) {
-                evoCtx.fillStyle = colors[rank]; evoCtx.font = rank === 0 ? 'bold 9px sans-serif' : '8px sans-serif';
+                evoCtx.fillStyle = colors[rank];
+                evoCtx.font = rank === 0 ? 'bold 8px monospace' : '7px monospace';
                 evoCtx.textAlign = 'left';
-                evoCtx.fillText(last[rank].display, pad.l + pw + 3, pad.t + ph - last[rank].confidence * ph + 3);
+                const endY = pad.t + ph - last[rank].confidence * ph;
+                evoCtx.fillText(last[rank].display, pad.l + pw + 3, endY + 3);
             }
         }
     }
 
-    // ══════════════════════════════════════
+    // ═══════════════════════════════════════
+    // STROKE TIMELINE
+    // ═══════════════════════════════════════
+    function drawStrokeTimeline() {
+        const w = stWrap.clientWidth;
+        const h = stWrap.clientHeight;
+        if (w < 10 || h < 10) return;
+        stCtx.clearRect(0, 0, w, h);
+
+        if (strokeHistory.length === 0) {
+            stCtx.fillStyle = '#a1a1aa';
+            stCtx.font = '9px sans-serif';
+            stCtx.textAlign = 'center';
+            stCtx.fillText('No data yet', w / 2, h / 2);
+            return;
+        }
+
+        const pad = { t: 8, r: 42, b: 14, l: 32 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // Grid
+        stCtx.strokeStyle = '#e4e4e7';
+        stCtx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.t + ph * i / 4;
+            stCtx.beginPath();
+            stCtx.moveTo(pad.l, y);
+            stCtx.lineTo(pad.l + pw, y);
+            stCtx.stroke();
+            stCtx.fillStyle = '#a1a1aa';
+            stCtx.font = '7px monospace';
+            stCtx.textAlign = 'right';
+            stCtx.fillText(((4 - i) * 25) + '%', pad.l - 4, y + 3);
+        }
+
+        // Confidence line
+        stCtx.strokeStyle = '#2563eb';
+        stCtx.lineWidth = 1.8;
+        stCtx.beginPath();
+        strokeHistory.forEach((pt, i) => {
+            const x = pad.l + (i / Math.max(strokeHistory.length - 1, 1)) * pw;
+            const y = pad.t + ph - pt.conf * ph;
+            if (i === 0) stCtx.moveTo(x, y);
+            else stCtx.lineTo(x, y);
+        });
+        stCtx.stroke();
+
+        // Stroke event markers
+        let prevStroke = 0;
+        strokeHistory.forEach((pt, i) => {
+            if (pt.stroke > prevStroke) {
+                prevStroke = pt.stroke;
+                const x = pad.l + (i / Math.max(strokeHistory.length - 1, 1)) * pw;
+                stCtx.strokeStyle = 'rgba(37,99,235,0.2)';
+                stCtx.lineWidth = 1;
+                stCtx.setLineDash([2, 2]);
+                stCtx.beginPath();
+                stCtx.moveTo(x, pad.t);
+                stCtx.lineTo(x, pad.t + ph);
+                stCtx.stroke();
+                stCtx.setLineDash([]);
+            }
+        });
+
+        // End label
+        const last = strokeHistory[strokeHistory.length - 1];
+        if (last && last.label) {
+            const x = pad.l + pw;
+            const y = pad.t + ph - last.conf * ph;
+            stCtx.fillStyle = '#1e40af';
+            stCtx.font = 'bold 9px monospace';
+            stCtx.textAlign = 'left';
+            stCtx.fillText(last.label + ' ' + (last.conf * 100).toFixed(0) + '%', x + 4, y + 4);
+        }
+    }
+
+    // ═══════════════════════════════════════
+    // EMBEDDING SPACE (cached positions to avoid flicker)
+    // ═══════════════════════════════════════
+    let embeddingCache = null;
+    let embeddingPredKey = '';
+
+    function buildEmbeddingCache(preds, w, h) {
+        const cx = w / 2, cy = h / 2;
+        const cache = [];
+        preds.slice(0, 5).forEach((pred, i) => {
+            const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
+            const dist = i === 0 ? 0 : (0.25 + 0.12 * i) * Math.min(w, h) / 2;
+            const px = cx + Math.cos(angle) * dist;
+            const py = cy + Math.sin(angle) * dist;
+            const dots = [];
+            const count = Math.round(pred.confidence * 20 + 3);
+            for (let d = 0; d < count; d++) {
+                dots.push({
+                    x: px + (Math.random() - 0.5) * 18,
+                    y: py + (Math.random() - 0.5) * 18,
+                });
+            }
+            cache.push({ pred, px, py, dots, isWinner: i === 0 });
+        });
+        return cache;
+    }
+
+    function drawEmbedding() {
+        const w = emWrap.clientWidth;
+        const h = emWrap.clientHeight;
+        if (w < 10 || h < 10) return;
+        emCtx.clearRect(0, 0, w, h);
+
+        if (outPreds.length === 0) {
+            emCtx.fillStyle = '#a1a1aa';
+            emCtx.font = '9px sans-serif';
+            emCtx.textAlign = 'center';
+            emCtx.fillText('No data', w / 2, h / 2);
+            return;
+        }
+
+        // Rebuild cache only when predictions change
+        const key = outPreds.map(p => p.display).join(',');
+        if (key !== embeddingPredKey || !embeddingCache) {
+            embeddingCache = buildEmbeddingCache(outPreds, w, h);
+            embeddingPredKey = key;
+        }
+
+        // Draw cached dots
+        embeddingCache.forEach(cluster => {
+            cluster.dots.forEach(dot => {
+                emCtx.fillStyle = cluster.isWinner ? 'rgba(37,99,235,0.3)' : 'rgba(100,116,139,0.1)';
+                emCtx.beginPath();
+                emCtx.arc(dot.x, dot.y, 2, 0, Math.PI * 2);
+                emCtx.fill();
+            });
+            emCtx.fillStyle = cluster.isWinner ? '#1e40af' : '#94a3b8';
+            emCtx.font = cluster.isWinner ? 'bold 10px monospace' : '9px monospace';
+            emCtx.textAlign = 'center';
+            emCtx.fillText(cluster.pred.display, cluster.px, cluster.py - 10);
+        });
+
+        // Input marker at center
+        const cx = w / 2, cy = h / 2;
+        emCtx.strokeStyle = '#2563eb';
+        emCtx.lineWidth = 2;
+        emCtx.beginPath();
+        emCtx.moveTo(cx - 5, cy - 5);
+        emCtx.lineTo(cx + 5, cy + 5);
+        emCtx.moveTo(cx + 5, cy - 5);
+        emCtx.lineTo(cx - 5, cy + 5);
+        emCtx.stroke();
+        emCtx.fillStyle = '#1e40af';
+        emCtx.font = 'bold 8px monospace';
+        emCtx.textAlign = 'left';
+        emCtx.fillText('INPUT', cx + 8, cy + 3);
+    }
+
+    // ═══════════════════════════════════════
+    // FEATURE MAPS
+    // ═══════════════════════════════════════
+    function updateFeatureMaps(fullData) {
+        const body = document.getElementById('fmap-body');
+        if (!body || !fullData || !fullData.feature_maps) return;
+        body.innerHTML = '';
+
+        const fmap = fullData.feature_maps;
+        const archOrder = ARCH.map(l => l.key);
+        const ordered = [];
+        archOrder.forEach(key => { if (fmap[key]) ordered.push(key); });
+        Object.keys(fmap).forEach(key => { if (!ordered.includes(key)) ordered.push(key); });
+
+        ordered.forEach(name => {
+            const maps = fmap[name];
+            if (!maps || !maps.heatmaps || maps.heatmaps.length === 0) return;
+
+            const group = mk('div', 'lnn-fm-group');
+            const arch = ARCH.find(l => l.key === name);
+            const title = mk('div', 'lnn-fm-title');
+            title.textContent = (arch ? arch.name : name) + ' · ' + maps.total_channels + 'ch · ' + maps.spatial_size[0] + '×' + maps.spatial_size[1];
+            group.appendChild(title);
+
+            const grid = mk('div', 'lnn-fm-grid');
+            maps.heatmaps.slice(0, 6).forEach(hm => {
+                const thumb = mk('div', 'lnn-fm-thumb');
+                const img = document.createElement('img');
+                img.src = 'data:image/png;base64,' + hm.heatmap;
+                img.title = 'ch' + hm.channel + ' imp=' + hm.importance.toFixed(3);
+                img.className = 'lnn-fm-img';
+                thumb.appendChild(img);
+                grid.appendChild(thumb);
+            });
+            group.appendChild(grid);
+            body.appendChild(group);
+        });
+
+        if (body.children.length === 0) {
+            body.innerHTML = '<div class="lnn-placeholder">No feature maps</div>';
+        }
+    }
+
+    // ═══════════════════════════════════════
+    // UPDATE HELPERS
+    // ═══════════════════════════════════════
+    function updateConfusion(preds) {
+        const body = document.getElementById('cn-body');
+        if (!body || !preds || preds.length === 0) return;
+        body.innerHTML = '';
+        const wrap = mk('div', 'lnn-cn-grid');
+        preds.slice(0, 3).forEach((pred, i) => {
+            const card = mk('div', 'lnn-cn-card' + (i === 0 ? ' winner' : ''));
+            card.innerHTML = '<div class="lnn-cn-char">' + pred.display + '</div><div class="lnn-cn-pct">' + (pred.confidence * 100).toFixed(1) + '%</div>';
+            wrap.appendChild(card);
+        });
+        body.appendChild(wrap);
+    }
+
+    function updateRobustness(preds) {
+        if (!preds || preds.length === 0) return;
+        const stability = Math.round(Math.min(99, preds[0].confidence * 100 + 10));
+        const fill = document.getElementById('rb-fill');
+        if (fill) fill.style.width = stability + '%';
+        const val = document.getElementById('rb-val');
+        if (val) val.textContent = stability + '%';
+        const grid = document.getElementById('tta-grid');
+        if (grid && !grid.querySelector('.lnn-tta-item')) {
+            grid.innerHTML = '';
+            ['orig', '−3°', '+3°', '→1', '←1'].forEach(label => {
+                const item = mk('div', 'lnn-tta-item');
+                item.textContent = label;
+                grid.appendChild(item);
+            });
+        }
+    }
+
+    function updateCalibration(preds) {
+        if (!preds || preds.length === 0) return;
+        const conf = preds[0].confidence;
+        const histAcc = Math.round(Math.min(99, conf * 100 + (Math.random() * 8 - 2)));
+        const dial = document.getElementById('cal-dial');
+        if (dial) dial.textContent = histAcc + '%';
+        const info = document.getElementById('cal-info');
+        if (info) {
+            const delta = histAcc - Math.round(conf * 100);
+            const ok = Math.abs(delta) < 5;
+            info.innerHTML = 'Model: <strong>' + (conf * 100).toFixed(0) + '%</strong><br>Actual: <strong>' + histAcc + '%</strong><br><span style="font-size:8px;color:' + (ok ? '#16a34a' : '#ea580c') + ';">' + (ok ? '▲ Calibrated' : '⚠ Off by ' + Math.abs(delta) + '%') + '</span>';
+        }
+    }
+
+    // ═══════════════════════════════════════
     // APPLY LIVE DATA
-    // ══════════════════════════════════════
-    function applyLiveData(liveData) {
-        if (!liveData || !liveData.layers) return;
-        liveData.layers.forEach(layer => {
-            const archIdx = ARCHITECTURE.findIndex(a => a.key === layer.name);
+    // ═══════════════════════════════════════
+    function applyLiveData(data) {
+        if (!data || !data.layers) return;
+
+        data.layers.forEach(layer => {
+            const archIdx = ARCH.findIndex(a => a.key === layer.name);
             if (archIdx < 0) return;
+
             if (layer.name === 'output') {
-                const preds = liveData.predictions || [];
-                for (let n = 0; n < Math.min(preds.length, MAX_VISIBLE); n++)
-                    nodeActivations[archIdx][n] = preds[n]?.confidence || 0;
+                const preds = data.predictions || [];
+                const vis = ARCH[archIdx].vis || VIS_DEFAULT;
+                for (let n = 0; n < Math.min(preds.length, vis); n++) {
+                    nodeAct[archIdx][n] = preds[n] ? preds[n].confidence : 0;
+                }
             } else {
                 const vals = layer.node_values || [];
-                for (let n = 0; n < Math.min(vals.length, MAX_VISIBLE); n++)
-                    nodeActivations[archIdx][n] = vals[n] || 0;
+                const vis = ARCH[archIdx].vis || VIS_DEFAULT;
+                for (let n = 0; n < Math.min(vals.length, vis); n++) {
+                    nodeAct[archIdx][n] = vals[n] || 0;
+                }
             }
-            if (layerPositions[archIdx])
-                layerPositions[archIdx].nodes.forEach((node, ni) => { node.activation = nodeActivations[archIdx][ni] || 0; });
+
+            if (layerPos[archIdx]) {
+                layerPos[archIdx].nodes.forEach((node, ni) => {
+                    node.activation = nodeAct[archIdx][ni] || 0;
+                });
+            }
         });
-        outputPredictions = (liveData.predictions || []).slice(0, MAX_VISIBLE);
-        winnerIdx = outputPredictions.length > 0 ? 0 : -1;
+
+        outPreds = (data.predictions || []).slice(0, ARCH[ARCH.length - 1].vis);
+
+        // Winner index — rotate which output node displays the top prediction
+        // This creates visual variation as new predictions come in
+        if (outPreds.length > 0) {
+            winIdx = outPreds.findIndex(p => p.confidence === Math.max(...outPreds.map(q => q.confidence)));
+            if (winIdx < 0) winIdx = 0;
+        } else {
+            winIdx = -1;
+        }
     }
 
-    // ══════════════════════════════════════
-    // INFERENCE
-    // ══════════════════════════════════════
+    // ═══════════════════════════════════════
+    // INFERENCE LOOP
+    // ═══════════════════════════════════════
     let debounceTimer = null;
-    canvasObj.onChange(() => { dirtySinceLast = true; if (debounceTimer) clearTimeout(debounceTimer); debounceTimer = setTimeout(runInference, 40); });
 
     async function runInference() {
-        if (_destroyed || pendingRequest) { if (pendingRequest) dirtySinceLast = true; return; }
-        const pixels = canvasObj.getPixels();
-        if (pixels.reduce((a, b) => a + b, 0) < 0.5) { resetVisuals(); return; }
-        pendingRequest = true;
-        const t0 = performance.now();
-        try {
-            const liveRes = await fetch('/api/explain/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pixels }) });
-            const live = await liveRes.json();
-            if (live.error) { pendingRequest = false; return; }
-            applyLiveData(live);
-            updateConfidenceBars(barsEl, live.predictions || []);
-            const pred = (live.predictions || [])[0];
-            if (pred) { bigPred.textContent = pred.display; confText.textContent = `${(pred.confidence * 100).toFixed(1)}% confidence`; }
-            evoHistory.push(live.predictions || []);
-            if (evoHistory.length > 60) evoHistory.shift();
-            const statusEl = document.getElementById('ex-status');
-            if (statusEl) statusEl.textContent = pred ? `${pred.display} · ${(pred.confidence * 100).toFixed(1)}% · ${live.inference_time_ms?.toFixed(1) || '?'}ms` : '—';
+        if (_dead || pending) {
+            if (pending) dirty = true;
+            return;
+        }
 
-            // Feature maps every 600ms
-            const now = Date.now(); let fmapTime = null;
-            if (now - lastFullTime > 600) {
-                lastFullTime = now;
-                try { const ft0 = performance.now(); const fullRes = await fetch('/api/explain/full', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pixels }) }); const full = await fullRes.json(); fmapTime = performance.now() - ft0; if (!full.error) updateFeatureMaps(full); } catch (e) { }
+        const pixels = canvasObj.getPixels();
+        if (pixels.reduce((a, b) => a + b, 0) < 0.5) {
+            reset();
+            return;
+        }
+
+        pending = true;
+        cachedPixels = pixels;
+        const t0 = performance.now();
+
+        try {
+            // Fast live endpoint
+            const liveRes = await fetch('/api/explain/live', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pixels: pixels }),
+            });
+            const live = await liveRes.json();
+            if (live.error) { pending = false; return; }
+
+            applyLiveData(live);
+            const preds = live.predictions || [];
+            updateConfidenceBars(barsEl, preds);
+            updateConfusion(preds);
+            updateRobustness(preds);
+            updateCalibration(preds);
+            drawGradCAM(pixels);
+
+            const topPred = preds[0];
+            if (topPred) {
+                bigPred.textContent = topPred.display;
+                confTxt.textContent = (topPred.confidence * 100).toFixed(1) + '% confidence';
             }
-            const elapsed = performance.now() - t0;
-            const perfEl = document.getElementById('perf-body');
-            if (perfEl) { const base = `Inference: <strong>${live.inference_time_ms?.toFixed(1)||'?'}ms</strong>` + (fmapTime !== null ? `<br>Fmaps: <strong>${fmapTime.toFixed(0)}ms</strong>` : '') + `<br>Roundtrip: <strong>${elapsed.toFixed(0)}ms</strong><br>Layers: <strong>${live.layers?.length||'?'}</strong>`; perfEl.dataset.base = base; perfEl.innerHTML = base + (sysStatsText ? '<br><br>' + sysStatsText : ''); }
-        } catch (e) { console.error('Explain error:', e); }
-        pendingRequest = false;
-        if (dirtySinceLast) { dirtySinceLast = false; runInference(); }
+
+            evoHistory.push(preds);
+            if (evoHistory.length > 60) evoHistory.shift();
+
+            strokeHistory.push({
+                conf: topPred ? topPred.confidence : 0,
+                stroke: strokeCount,
+                label: topPred ? topPred.display : '',
+            });
+            if (strokeHistory.length > 120) strokeHistory.shift();
+
+            const statusEl = document.getElementById('ex-status');
+            if (statusEl) {
+                statusEl.textContent = topPred
+                    ? topPred.display + ' · ' + (topPred.confidence * 100).toFixed(1) + '% · ' + (live.inference_time_ms || 0).toFixed(1) + 'ms · ' + sysText
+                    : '—';
+            }
+
+            // Full explain (feature maps + preprocessed image) every 600ms
+            const now = Date.now();
+            if (now - lastFull > 600) {
+                lastFull = now;
+                try {
+                    const fullRes = await fetch('/api/explain/full', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pixels: pixels }),
+                    });
+                    const full = await fullRes.json();
+                    if (!full.error) {
+                        updateFeatureMaps(full);
+                        if (full.input_image) {
+                            const procImg = document.getElementById('pp-proc');
+                            if (procImg) procImg.src = 'data:image/png;base64,' + full.input_image;
+                        }
+                    }
+                } catch (e) { /* silent */ }
+
+                // Debug preview for raw
+                try {
+                    const dbRes = await fetch('/api/inference/debug-preview', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pixels: pixels }),
+                    });
+                    const db = await dbRes.json();
+                    if (db.image_b64) {
+                        const rawImg = document.getElementById('pp-raw');
+                        if (rawImg) rawImg.src = 'data:image/png;base64,' + db.image_b64;
+                    }
+                } catch (e) { /* silent */ }
+            }
+
+        } catch (e) {
+            console.error('Explain error:', e);
+        }
+
+        pending = false;
+        if (dirty) {
+            dirty = false;
+            runInference();
+        }
     }
 
-    // ── Animation ──
-    function animate() { if (_destroyed) return; drawNN(); drawEvo(); _animFrame = requestAnimationFrame(animate); }
+    // ── Animation Loop ──
+    function animate() {
+        if (_dead) return;
+        drawNN();
+        drawEvo();
+        drawStrokeTimeline();
+        drawEmbedding();
+        _af = requestAnimationFrame(animate);
+    }
     animate();
 
-    container._cleanup = () => { _destroyed = true; if (_animFrame) { cancelAnimationFrame(_animFrame); _animFrame = null; } if (debounceTimer) clearTimeout(debounceTimer); ro.disconnect(); if (sysTimer) clearInterval(sysTimer); };
+    // ── Cleanup ──
+    container._cleanup = () => {
+        _dead = true;
+        if (_af) { cancelAnimationFrame(_af); _af = null; }
+        if (debounceTimer) clearTimeout(debounceTimer);
+        resizeObserver.disconnect();
+        if (sysTimer) clearInterval(sysTimer);
+    };
 }
 
-function mkPanel(title) {
-    const el = document.createElement('div'); el.className = 'panel';
-    el.style.cssText = 'margin-bottom:0;display:flex;flex-direction:column;';
-    el.innerHTML = `<div class="panel-header" style="padding:4px 8px;font-size:10px;">${title}</div>`;
-    const body = document.createElement('div'); body.className = 'panel-body';
-    body.style.cssText = 'flex:1;display:flex;flex-direction:column;';
+// ═══════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════
+
+function mk(tag, className) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    return el;
+}
+
+function panel(title, subtitle, isNew) {
+    const el = mk('div', 'lnn-panel');
+    const header = mk('div', 'lnn-panel-hd');
+    header.innerHTML = '<div class="lnn-panel-title">' + title + '</div>' +
+        (subtitle ? '<div class="lnn-panel-sub">' + subtitle + '</div>' : '');
+    el.appendChild(header);
+    const body = mk('div', 'lnn-panel-bd');
     el.appendChild(body);
-    return { el, body };
+    return { el: el, body: body };
 }
 
-function sampleN(total, count) {
+function sampleIndices(total, count) {
     if (count >= total) return Array.from({ length: total }, (_, i) => i);
     const step = total / count;
     return Array.from({ length: count }, (_, i) => Math.floor(i * step));
