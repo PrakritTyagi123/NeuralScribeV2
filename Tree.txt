@@ -1,10 +1,12 @@
 NeuralScribeV2
 │   .gitignore
 │   LICENSE
+│   project_config.json
 │   README.md
 │   requirements.txt
 │   run_backend.py
 │   Tree.txt
+│   verify_english.py
 │
 ├───backend
 │   │   __init__.py
@@ -57,61 +59,116 @@ NeuralScribeV2
 │           __init__.py
 │
 ├───configs
-│       class_registry.yaml
-│       prep_v2.yaml
-│       train_v2.yaml
+│   │   class_registry.yaml
+│   │   prep_v2.yaml
+│   │   train_v2.yaml
+│   │
+│   └───languages
+│       ├───arabic
+│       │       class_registry.yaml
+│       │
+│       ├───chinese
+│       │       class_registry.yaml
+│       │
+│       ├───cyrillic
+│       │       class_registry.yaml
+│       │
+│       ├───devanagari
+│       │       class_registry.yaml
+│       │
+│       └───english
+│               class_registry.yaml
+│               prep.yaml
+│               train.yaml
 │
 ├───data
 │   ├───cache
 │   ├───fonts
 │   └───raw
-│       └───emnist
-└───frontend
-    │   index.html
-    │   style.css
-    │
-    ├───assets
-    │   ├───fonts
-    │   └───icons
-    │           brain.svg
-    │           dashboard.svg
-    │           database.svg
-    │           download.svg
-    │           gpu.svg
-    │           model.svg
-    │           moon.svg
-    │           pen.svg
-    │           setting.svg
-    │           sun.svg
-    │           training.svg
-    │
-    ├───components
-    │       canvas.js
-    │       chart.js
-    │       confidenceBars.js
-    │       featureMapViewer.js
-    │       logConsole.js
-    │       modal.js
-    │       networkFlow.js
-    │       probEvolution.js
-    │       progressBar.js
-    │       statCard.js
-    │       toast.js
-    │
-    ├───src
-    │   │   main.js
-    │   │   router.js
-    │   │   theme.js
-    │   │   ws.js
-    │   │
-    │   └───state
-    │           appState.js
-    │
-    └───views
-            dashboard.js
-            dataPrep.js
-            explainability.js
-            inference.js
-            modelManager.js
-            setting.js
-            training.js
+├───datasets
+│   ├───arabic
+│   │   ├───cache
+│   │   └───raw
+│   ├───chinese
+│   │   ├───cache
+│   │   └───raw
+│   ├───cyrillic
+│   │   ├───cache
+│   │   └───raw
+│   ├───devanagari
+│   │   ├───cache
+│   │   └───raw
+│   └───english
+│       ├───cache
+│       └───raw
+├───frontend
+│   │   index.html
+│   │   lnn.css
+│   │   style.css
+│   │
+│   ├───assets
+│   │   ├───fonts
+│   │   └───icons
+│   │           brain.svg
+│   │           dashboard.svg
+│   │           database.svg
+│   │           download.svg
+│   │           gpu.svg
+│   │           model.svg
+│   │           moon.svg
+│   │           pen.svg
+│   │           setting.svg
+│   │           sun.svg
+│   │           training.svg
+│   │
+│   ├───components
+│   │       canvas.js
+│   │       chart.js
+│   │       confidenceBars.js
+│   │       featureMapViewer.js
+│   │       lnnCharts.js
+│   │       lnnPanels.js
+│   │       logConsole.js
+│   │       modal.js
+│   │       networkFlow.js
+│   │       nnDiagram.js
+│   │       probEvolution.js
+│   │       progressBar.js
+│   │       statCard.js
+│   │       toast.js
+│   │
+│   ├───src
+│   │   │   main.js
+│   │   │   router.js
+│   │   │   theme.js
+│   │   │   ws.js
+│   │   │
+│   │   └───state
+│   │           appState.js
+│   │
+│   └───views
+│           dashboard.js
+│           dataPrep.js
+│           explainability.js
+│           inference.js
+│           modelManager.js
+│           setting.js
+│           training.js
+│
+├───models
+│   ├───arabic
+│   │   └───exports
+│   ├───chinese
+│   │   └───exports
+│   ├───cyrillic
+│   │   └───exports
+│   ├───devanagari
+│   │   └───exports
+│   └───english
+│       └───exports
+└───training_logs
+    ├───arabic
+    ├───chinese
+    ├───cyrillic
+    ├───devanagari
+    └───english
