@@ -1,10 +1,9 @@
 """
-NeuralScribe v2 — CLI training script.
-Standalone alternative to the Training UI tab.
+NeuralScribe v2 — CLI training script (language-aware).
 
 Usage:
-    python backend/scripts/train.py --config configs/train_v2.yaml
-    python backend/scripts/train.py --resume backend/models/best_model.pth
+    python backend/scripts/train.py --language english
+    python backend/scripts/train.py --language english --resume models/english/best_model.pth
 """
 
 import sys
@@ -18,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from backend.utils.logging import setup_logging, get_logger
 from backend.utils.helpers import eta_string
+from backend.utils.config import SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE
 from backend.services.dataset_service import DatasetService
 from backend.services.training_service import TrainingService
 
@@ -39,10 +39,11 @@ def print_epoch(data: dict):
         eta = data.get("eta_seconds", 0)
         best = data.get("best_val_acc", 0)
         is_best = data.get("is_best", False)
+        lang = data.get("language", "")
 
         star = " ★ BEST" if is_best else ""
         print(
-            f"  Epoch {epoch:3d}/{total} | "
+            f"  [{lang}] Epoch {epoch:3d}/{total} | "
             f"train_loss={t_loss:.4f} train_acc={t_acc:.4f} | "
             f"val_loss={v_loss:.4f} val_acc={v_acc:.4f} | "
             f"lr={lr:.6f} | {etime:.1f}s | "
@@ -50,35 +51,37 @@ def print_epoch(data: dict):
         )
 
     elif data.get("type") == "training_batch":
-        epoch = data["epoch"]
         batch = data["batch"]
         total_b = data["total_batches"]
         loss = data["loss"]
         pct = batch / total_b * 100 if total_b > 0 else 0
         print(f"\r    batch {batch}/{total_b} ({pct:.0f}%) loss={loss:.4f}", end="", flush=True)
         if batch > 0 and batch % 200 == 0:
-            print()  # newline periodically
+            print()
 
 
-async def run_training(config_path: str, resume_path: str = None):
-    """Run the training pipeline."""
+async def run_training(language: str, resume_path: str = None):
+    """Run the training pipeline for a specific language."""
     log.info("=" * 60)
-    log.info("NeuralScribe v2 — Training")
+    log.info(f"NeuralScribe v2 — Training [{language.upper()}]")
     log.info("=" * 60)
 
     # Load dataset
     ds = DatasetService()
+    ds.set_language(language)
     status = ds.get_status()
 
     if not status["cache_exists"]:
-        log.error("Dataset not prepared! Run prepare_dataset.py first.")
+        log.error(f"Dataset not prepared for {language}! Run prepare_dataset.py --language {language} first.")
         log.error(f"  Expected: {status['cache_path']}")
         return
 
-    log.info(f"Dataset cache: {status['cache_size']}")
+    log.info(f"Language:      {language}")
+    log.info(f"Dataset cache: {status['cache_size']} ({status['num_classes']} classes)")
 
-    # Create service
+    # Create training service
     ts = TrainingService()
+    ts.set_language(language)
     cfg = ts.get_config()
 
     batch_size = cfg.get("training", {}).get("batch_size", 256)
@@ -86,8 +89,8 @@ async def run_training(config_path: str, resume_path: str = None):
     pin_memory = cfg.get("training", {}).get("pin_memory", True)
     epochs = cfg.get("training", {}).get("epochs", 100)
 
-    log.info(f"Config: batch_size={batch_size}, epochs={epochs}, workers={num_workers}")
-    log.info(f"Device: {ts.get_status()['device']}")
+    log.info(f"Config:  batch_size={batch_size}, epochs={epochs}, workers={num_workers}")
+    log.info(f"Device:  {ts.get_status()['device']}")
 
     # Create dataloaders
     train_loader = ds.get_dataloader("train", batch_size=batch_size,
@@ -124,7 +127,7 @@ async def run_training(config_path: str, resume_path: str = None):
         log.error(f"Training failed: {result['error']}")
         return
 
-    log.info(f"Training {result.get('status', 'complete')}!")
+    log.info(f"Training {result.get('status', 'complete')} for {language}!")
     log.info(f"  Epochs run:     {result.get('epochs_run', 0)}")
     log.info(f"  Best val acc:   {result.get('best_val_acc', 0):.4f}")
     log.info(f"  Total time:     {elapsed:.1f}s")
@@ -134,8 +137,9 @@ async def run_training(config_path: str, resume_path: str = None):
 def main():
     parser = argparse.ArgumentParser(description="NeuralScribe v2 — Train Model")
     parser.add_argument(
-        "--config", type=str, default="configs/train_v2.yaml",
-        help="Path to training config YAML",
+        "--language", type=str, default=DEFAULT_LANGUAGE,
+        choices=SUPPORTED_LANGUAGES,
+        help=f"Language to train for (default: {DEFAULT_LANGUAGE})",
     )
     parser.add_argument(
         "--resume", type=str, default=None,
@@ -143,7 +147,7 @@ def main():
     )
     args = parser.parse_args()
 
-    asyncio.run(run_training(args.config, args.resume))
+    asyncio.run(run_training(args.language, args.resume))
 
 
 if __name__ == "__main__":

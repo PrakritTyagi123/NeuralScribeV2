@@ -1,8 +1,8 @@
 """
-Dataset service for NeuralScribe v2.
+NeuralScribe v2 — Dataset service (language-aware).
 Handles EMNIST loading, synthetic symbol generation, preprocessing,
 augmentation caching, and dataset splitting.
-Emits progress via WebSocket callback.
+Each language has its own config, registry, cache, and dataset directory.
 """
 
 import os
@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Tuple
 import asyncio
 
-from ..utils.config import Config, ClassRegistry, PROJECT_ROOT
+from ..utils.config import (
+    Config, ClassRegistry, ProjectConfig, LanguagePaths,
+    PROJECT_ROOT, DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES,
+    get_language_paths, ensure_all_language_dirs,
+)
 from ..utils.logging import get_logger
 from ..utils.helpers import human_readable_size, eta_string
 from ..ml.preprocess import (
@@ -27,38 +31,27 @@ from ..ml.augmentation import AugmentationPipeline
 log = get_logger(__name__)
 
 
-# EMNIST Balanced class mapping (47 classes)
-# EMNIST balanced merges some confusable pairs.
-# Mapping from EMNIST class index to our class registry IDs.
-# EMNIST balanced: 0-9 = digits, 10-35 = uppercase A-Z, 36-46 = lowercase (subset)
-# The "balanced" split merges these lowercase with uppercase:
-# c, i, j, k, l, m, o, p, s, u, v, w, x, y, z → not separate classes
-# So EMNIST balanced has only: a, b, d, e, f, g, h, n, q, r, t
-EMNIST_BALANCED_LABELS = (
-    list(range(10)) +                    # 0-9 → digits
-    [chr(c) for c in range(65, 91)] +    # 10-35 → A-Z
-    list("abdefghnqrt")                  # 36-46 → lowercase subset (11 chars)
-    # Note: actual EMNIST balanced has specific merged mapping
-)
-
-
 def _build_emnist_label_map(registry: ClassRegistry) -> Dict[int, int]:
     """
     Build mapping from EMNIST balanced class index to our registry class IDs.
-    EMNIST balanced split has 47 classes.
+    Only maps classes that exist in the registry (language-dependent).
     """
     mapping = {}
 
-    # Digits 0-9: EMNIST idx 0-9 → our 0-9
+    # Digits 0-9: EMNIST idx 0-9
     for i in range(10):
-        mapping[i] = i
+        our_id = registry.label_to_id(str(i))
+        if our_id is not None:
+            mapping[i] = our_id
 
-    # Uppercase A-Z: EMNIST idx 10-35 → our 10-35
+    # Uppercase A-Z: EMNIST idx 10-35
     for i in range(26):
-        mapping[10 + i] = 10 + i
+        ch = chr(65 + i)  # A-Z
+        our_id = registry.label_to_id(ch)
+        if our_id is not None:
+            mapping[10 + i] = our_id
 
     # Lowercase subset in balanced: EMNIST idx 36-46
-    # EMNIST balanced lowercase order: a, b, d, e, f, g, h, n, q, r, t
     emnist_lower_chars = ['a', 'b', 'd', 'e', 'f', 'g', 'h', 'n', 'q', 'r', 't']
     for i, ch in enumerate(emnist_lower_chars):
         our_id = registry.label_to_id(ch)
@@ -70,16 +63,62 @@ def _build_emnist_label_map(registry: ClassRegistry) -> Dict[int, int]:
 
 class DatasetService:
     """
-    Manages dataset preparation: loading, preprocessing, caching.
+    Manages dataset preparation per language.
+    Call set_language() to switch context.
     """
 
     def __init__(self):
-        self._prep_config = Config("configs/prep_v2.yaml")
-        self._registry = ClassRegistry()
+        self._project_config = ProjectConfig()
+        self._language = self._project_config.selected_language
+        self._paths = get_language_paths(self._language)
+        self._prep_config = self._load_prep_config()
+        self._registry = ClassRegistry(language=self._language)
         self._is_preparing = False
         self._cancel_requested = False
         self._progress: Dict[str, Any] = {}
         self._cached_dataset: Optional[Dict[str, torch.Tensor]] = None
+
+        ensure_all_language_dirs()
+
+    def _load_prep_config(self) -> Config:
+        """Load prep config for current language, fallback to empty."""
+        config_path = self._paths.prep_config
+        if config_path.exists():
+            return Config(str(config_path.relative_to(PROJECT_ROOT)))
+        return Config()
+
+    # ── Language switching ──
+
+    @property
+    def language(self) -> str:
+        return self._language
+
+    def set_language(self, language: str) -> Dict[str, Any]:
+        """Switch to a different language context."""
+        if language not in SUPPORTED_LANGUAGES:
+            return {"error": f"Unsupported language: {language}"}
+        if language == self._language and self._registry.num_classes > 0:
+            return {"status": "already_set", "language": language}
+
+        self._language = language
+        self._paths = get_language_paths(language)
+        self._paths.ensure_dirs()
+        self._prep_config = self._load_prep_config()
+        self._registry = ClassRegistry(language=language)
+        self._cached_dataset = None  # Clear cached data for old language
+
+        # Update project config
+        self._project_config.set_ui_state("prep_language", language)
+
+        log.info(f"Dataset service switched to language: {language} ({self._registry.num_classes} classes)")
+        return {
+            "status": "switched",
+            "language": language,
+            "num_classes": self._registry.num_classes,
+            "registry_status": self._registry.status,
+        }
+
+    # ── Properties ──
 
     @property
     def is_preparing(self) -> bool:
@@ -97,17 +136,19 @@ class DatasetService:
         self._cancel_requested = True
 
     def get_status(self) -> Dict[str, Any]:
-        cache_path = PROJECT_ROOT / self._prep_config.get("cache.path", "data/cache/cached_dataset_v2.pt")
+        cache_path = self._paths.dataset_cache
         cache_exists = cache_path.exists()
         cache_size = human_readable_size(cache_path.stat().st_size) if cache_exists else "N/A"
 
         return {
+            "language": self._language,
             "cache_exists": cache_exists,
             "cache_path": str(cache_path),
             "cache_size": cache_size,
             "is_preparing": self._is_preparing,
             "progress": self._progress,
             "num_classes": self._registry.num_classes,
+            "registry_status": self._registry.status,
         }
 
     def get_config(self) -> Dict[str, Any]:
@@ -116,28 +157,33 @@ class DatasetService:
     def update_config(self, overrides: Dict[str, Any]) -> None:
         self._prep_config.update(overrides)
 
+    # ── Dataset preparation ──
+
     async def prepare_dataset(self, ws_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """
-        Run the full dataset preparation pipeline.
-        Emits progress via ws_callback(event_dict).
-        """
+        """Run the full dataset preparation pipeline for the current language."""
         if self._is_preparing:
             return {"error": "Dataset preparation already in progress"}
 
+        # Check if language is placeholder
+        if self._registry.status == "placeholder":
+            return {"error": f"Language '{self._language}' is a placeholder. Dataset not available yet."}
+
         self._is_preparing = True
         self._cancel_requested = False
-        self._progress = {"stage": "starting", "processed": 0, "total": 0}
+        self._progress = {"stage": "starting", "processed": 0, "total": 0, "language": self._language}
 
-        # Capture main event loop before entering thread
         main_loop = asyncio.get_event_loop()
 
         try:
             result = await main_loop.run_in_executor(
                 None, self._prepare_sync, ws_callback, main_loop
             )
+            # Update project config on success
+            if result.get("status") == "complete":
+                self._project_config.set_language_config(self._language, "dataset_prepared", True)
             return result
         except Exception as e:
-            log.error(f"Dataset preparation failed: {e}", exc_info=True)
+            log.error(f"Dataset preparation failed for {self._language}: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             self._is_preparing = False
@@ -148,6 +194,7 @@ class DatasetService:
         config = self._prep_config
 
         def emit(data: Dict):
+            data["language"] = self._language
             self._progress = data
             if ws_callback and main_loop:
                 try:
@@ -155,29 +202,34 @@ class DatasetService:
                 except Exception:
                     pass
 
-        emit({"stage": "loading_emnist", "processed": 0, "total": 0, "message": "Loading EMNIST..."})
+        emit({"stage": "loading_emnist", "processed": 0, "total": 0, "message": f"Loading EMNIST for {self._language}..."})
 
         # ── Step 1: Load EMNIST ──
         emnist_images, emnist_labels = self._load_emnist(config, emit)
         if self._cancel_requested:
             return {"status": "cancelled"}
 
-        log.info(f"EMNIST loaded: {len(emnist_images)} samples")
+        log.info(f"[{self._language}] EMNIST loaded: {len(emnist_images)} samples")
 
-        # ── Step 2: Generate synthetic symbols ──
+        # ── Step 2: Generate synthetic symbols (if enabled) ──
         synth_images, synth_labels = self._generate_synthetic(config, emit)
         if self._cancel_requested:
             return {"status": "cancelled"}
 
-        log.info(f"Synthetic generated: {len(synth_images)} samples")
+        if len(synth_images) > 0:
+            log.info(f"[{self._language}] Synthetic generated: {len(synth_images)} samples")
 
         # ── Step 3: Merge datasets ──
         emit({"stage": "merging", "message": "Merging datasets..."})
-        all_images = np.concatenate([emnist_images, synth_images], axis=0)
-        all_labels = np.concatenate([emnist_labels, synth_labels], axis=0)
+        if len(synth_images) > 0:
+            all_images = np.concatenate([emnist_images, synth_images], axis=0)
+            all_labels = np.concatenate([emnist_labels, synth_labels], axis=0)
+        else:
+            all_images = emnist_images
+            all_labels = emnist_labels
 
         total_samples = len(all_images)
-        log.info(f"Merged dataset: {total_samples} samples")
+        log.info(f"[{self._language}] Merged dataset: {total_samples} samples")
 
         # ── Step 4: Preprocess ──
         emit({"stage": "preprocessing", "processed": 0, "total": total_samples, "message": "Preprocessing..."})
@@ -188,7 +240,6 @@ class DatasetService:
         # ── Step 5: Augmentation (precompute if enabled) ──
         precompute_enabled = config.get("augmentation.precompute", False)
         precompute_factor = config.get("augmentation.precompute_factor", 3)
-        log.info(f"Augmentation: precompute={precompute_enabled}, factor={precompute_factor}")
         if precompute_enabled:
             emit({"stage": "augmenting", "processed": 0, "total": total_samples, "message": "Augmenting..."})
             all_images, all_labels = self._precompute_augmentations(
@@ -203,7 +254,7 @@ class DatasetService:
 
         # ── Step 7: Cache ──
         emit({"stage": "caching", "message": "Saving cached dataset..."})
-        cache_path = PROJECT_ROOT / config.get("cache.path", "data/cache/cached_dataset_v2.pt")
+        cache_path = self._paths.dataset_cache
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         cache_data = {
@@ -216,6 +267,7 @@ class DatasetService:
             "mean": DEFAULT_MEAN,
             "std": DEFAULT_STD,
             "num_classes": self._registry.num_classes,
+            "language": self._language,
             "class_registry": self._registry.to_dict(),
         }
 
@@ -224,6 +276,7 @@ class DatasetService:
 
         result = {
             "status": "complete",
+            "language": self._language,
             "total_samples": len(splits["train_images"]) + len(splits["val_images"]) + len(splits["test_images"]),
             "train_samples": len(splits["train_images"]),
             "val_samples": len(splits["val_images"]),
@@ -238,7 +291,7 @@ class DatasetService:
         return result
 
     def _load_emnist(self, config: Config, emit: Callable) -> Tuple[np.ndarray, np.ndarray]:
-        """Load EMNIST balanced dataset."""
+        """Load EMNIST balanced dataset, filtered to current language's classes."""
         import torchvision
 
         emnist_root = str(PROJECT_ROOT / config.get("dataset.emnist_root", "data/raw/emnist"))
@@ -264,10 +317,9 @@ class DatasetService:
                 img, label = dataset[i]
                 img_array = np.array(img, dtype=np.float32).squeeze()
 
-                # Map EMNIST label to our registry
+                # Only keep classes mapped in our registry
                 if label in label_map:
                     our_label = label_map[label]
-                    # Apply EMNIST orientation correction
                     img_array = apply_emnist_orientation(img_array)
                     all_images.append(img_array)
                     all_labels.append(our_label)
@@ -281,20 +333,26 @@ class DatasetService:
                         "message": f"Loading EMNIST {split_name}: {len(all_images)} samples",
                     })
 
+        if len(all_images) == 0:
+            return np.zeros((0, 28, 28), dtype=np.float32), np.zeros(0, dtype=np.int64)
+
         return np.stack(all_images, axis=0), np.array(all_labels, dtype=np.int64)
 
     def _generate_synthetic(self, config: Config, emit: Callable) -> Tuple[np.ndarray, np.ndarray]:
         """Generate synthetic images for classes not covered by EMNIST."""
-        if not config.get("synthetic.enabled", True):
+        if not config.get("synthetic.enabled", False):
             return np.zeros((0, 28, 28), dtype=np.float32), np.zeros(0, dtype=np.int64)
 
-        # Determine which classes need synthetic data
-        # EMNIST covers: digits (0-9), uppercase (10-35), and some lowercase
-        # We need synthetic for: remaining lowercase, all Greek, all symbols
-        emnist_covered_ids = set(range(10))  # digits
-        emnist_covered_ids.update(range(10, 36))  # uppercase
-
-        # EMNIST lowercase subset
+        # Determine EMNIST-covered IDs
+        emnist_covered_ids = set()
+        for i in range(10):
+            cid = self._registry.label_to_id(str(i))
+            if cid is not None:
+                emnist_covered_ids.add(cid)
+        for i in range(26):
+            cid = self._registry.label_to_id(chr(65 + i))
+            if cid is not None:
+                emnist_covered_ids.add(cid)
         emnist_lower_chars = ['a', 'b', 'd', 'e', 'f', 'g', 'h', 'n', 'q', 'r', 't']
         for ch in emnist_lower_chars:
             cid = self._registry.label_to_id(ch)
@@ -341,20 +399,14 @@ class DatasetService:
 
         for i in range(total):
             if self._cancel_requested:
-                return np.array(processed)
+                return np.array(processed) if processed else np.zeros((0, 28, 28), dtype=np.float32)
 
             img = images[i]
-
-            # Always apply bbox crop + center-of-mass alignment so that
-            # training data matches the inference preprocessing pipeline
-            # (preprocess_canvas_data always applies these transforms).
             img = bbox_crop_pad(img)
             if do_com:
                 img = center_of_mass_align(img, target_size)
-
             if do_smooth:
                 img = smooth_image(img, sigma)
-
             processed.append(img)
 
             if i % 5000 == 0 and i > 0:
@@ -407,7 +459,6 @@ class DatasetService:
                         "samples_per_sec": round(rate),
                         "message": f"Augmenting pass {f+1}/{factor}: {done}/{total}",
                     })
-
             aug_images.append(np.stack(batch_imgs, axis=0))
             aug_labels.append(labels.copy())
 
@@ -416,12 +467,7 @@ class DatasetService:
     def _split_dataset(
         self, images: np.ndarray, labels: np.ndarray, config: Config
     ) -> Dict[str, np.ndarray]:
-        """Split into train/val/test.
-
-        If split.stratified is true in the config, perform per-class
-        stratified splitting using the provided labels; otherwise fall
-        back to a simple random split.
-        """
+        """Split into train/val/test with optional stratification."""
         test_ratio = config.get("split.test_ratio", 0.15)
         val_ratio = config.get("split.val_ratio", 0.10)
         seed = config.get("split.seed", 42)
@@ -430,46 +476,27 @@ class DatasetService:
         rng = np.random.RandomState(seed)
 
         if not stratified:
-            # Simple random split
             n = len(images)
             indices = rng.permutation(n)
-
             test_size = int(n * test_ratio)
             val_size = int(n * val_ratio)
-
             test_idx = indices[:test_size]
             val_idx = indices[test_size:test_size + val_size]
             train_idx = indices[test_size + val_size:]
         else:
-            # Per-class stratified split
             unique_labels = np.unique(labels)
-            train_idx_list = []
-            val_idx_list = []
-            test_idx_list = []
-
+            train_idx_list, val_idx_list, test_idx_list = [], [], []
             for cls in unique_labels:
                 cls_indices = np.where(labels == cls)[0]
                 if cls_indices.size == 0:
                     continue
                 cls_perm = rng.permutation(cls_indices)
                 n_cls = cls_perm.size
-
                 cls_test_size = int(n_cls * test_ratio)
                 cls_val_size = int(n_cls * val_ratio)
-
-                cls_test = cls_perm[:cls_test_size]
-                cls_val = cls_perm[cls_test_size:cls_test_size + cls_val_size]
-                cls_train = cls_perm[cls_test_size + cls_val_size:]
-
-                if cls_train.size:
-                    train_idx_list.append(cls_train)
-                if cls_val.size:
-                    val_idx_list.append(cls_val)
-                if cls_test.size:
-                    test_idx_list.append(cls_test)
-
-            # Concatenate per-class indices; final order is arbitrary but
-            # class distributions are preserved across splits.
+                test_idx_list.append(cls_perm[:cls_test_size])
+                val_idx_list.append(cls_perm[cls_test_size:cls_test_size + cls_val_size])
+                train_idx_list.append(cls_perm[cls_test_size + cls_val_size:])
             train_idx = np.concatenate(train_idx_list) if train_idx_list else np.array([], dtype=int)
             val_idx = np.concatenate(val_idx_list) if val_idx_list else np.array([], dtype=int)
             test_idx = np.concatenate(test_idx_list) if test_idx_list else np.array([], dtype=int)
@@ -483,14 +510,15 @@ class DatasetService:
             "test_labels": labels[test_idx],
         }
 
-    def load_cached_dataset(self) -> Optional[Dict[str, torch.Tensor]]:
-        """Load the cached dataset from disk."""
-        cache_path = PROJECT_ROOT / self._prep_config.get("cache.path", "data/cache/cached_dataset_v2.pt")
-        if not cache_path.exists():
-            log.warning(f"Cache not found: {cache_path}")
-            return None
+    # ── Cache / DataLoader ──
 
-        log.info(f"Loading cached dataset from {cache_path}")
+    def load_cached_dataset(self) -> Optional[Dict[str, torch.Tensor]]:
+        """Load the cached dataset for current language from disk."""
+        cache_path = self._paths.dataset_cache
+        if not cache_path.exists():
+            log.warning(f"[{self._language}] Cache not found: {cache_path}")
+            return None
+        log.info(f"[{self._language}] Loading cached dataset from {cache_path}")
         data = torch.load(cache_path, map_location="cpu", weights_only=False)
         self._cached_dataset = data
         return data
@@ -512,22 +540,14 @@ class DatasetService:
         data = self.get_cached_dataset()
         if data is None:
             return None
-
         images = data[f"{split}_images"]
         labels = data[f"{split}_labels"]
         mean = data.get("mean", DEFAULT_MEAN)
         std = data.get("std", DEFAULT_STD)
-
-        # Normalize: images are stored as 0-1 floats
-        images = (images.unsqueeze(1) - mean) / std  # (N, 1, 28, 28)
-
+        images = (images.unsqueeze(1) - mean) / std
         dataset = TensorDataset(images, labels)
         return torch.utils.data.DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-            persistent_workers=num_workers > 0,
-            drop_last=(split == "train"),
+            dataset, batch_size=batch_size, shuffle=shuffle,
+            num_workers=num_workers, pin_memory=pin_memory,
+            persistent_workers=num_workers > 0, drop_last=(split == "train"),
         )

@@ -1,0 +1,69 @@
+# NeuralScribe v2 — Devanagari Class Registry
+# Characters: Devanagari consonants + vowels + digits
+# Total: 46 classes (placeholder — will expand with dataset)
+# Source: Devanagari Handwritten Character Dataset (DHCD) or similar
+#
+# STATUS: PLACEHOLDER — dataset integration pending
+
+version: 2
+language: devanagari
+total_classes: 46
+status: placeholder
+
+classes:
+  # ── Devanagari Digits (०–९) ──
+  - { id: 0,  label: "dv_0",  display: "०", category: digit }
+  - { id: 1,  label: "dv_1",  display: "१", category: digit }
+  - { id: 2,  label: "dv_2",  display: "२", category: digit }
+  - { id: 3,  label: "dv_3",  display: "३", category: digit }
+  - { id: 4,  label: "dv_4",  display: "४", category: digit }
+  - { id: 5,  label: "dv_5",  display: "५", category: digit }
+  - { id: 6,  label: "dv_6",  display: "६", category: digit }
+  - { id: 7,  label: "dv_7",  display: "७", category: digit }
+  - { id: 8,  label: "dv_8",  display: "८", category: digit }
+  - { id: 9,  label: "dv_9",  display: "९", category: digit }
+
+  # ── Vowels ──
+  - { id: 10, label: "a",     display: "अ", category: vowel }
+  - { id: 11, label: "aa",    display: "आ", category: vowel }
+  - { id: 12, label: "i",     display: "इ", category: vowel }
+  - { id: 13, label: "ii",    display: "ई", category: vowel }
+  - { id: 14, label: "u",     display: "उ", category: vowel }
+  - { id: 15, label: "uu",    display: "ऊ", category: vowel }
+  - { id: 16, label: "e",     display: "ए", category: vowel }
+  - { id: 17, label: "ai",    display: "ऐ", category: vowel }
+  - { id: 18, label: "o",     display: "ओ", category: vowel }
+  - { id: 19, label: "au",    display: "औ", category: vowel }
+
+  # ── Consonants (common subset) ──
+  - { id: 20, label: "ka",    display: "क", category: consonant }
+  - { id: 21, label: "kha",   display: "ख", category: consonant }
+  - { id: 22, label: "ga",    display: "ग", category: consonant }
+  - { id: 23, label: "gha",   display: "घ", category: consonant }
+  - { id: 24, label: "cha",   display: "च", category: consonant }
+  - { id: 25, label: "chha",  display: "छ", category: consonant }
+  - { id: 26, label: "ja",    display: "ज", category: consonant }
+  - { id: 27, label: "jha",   display: "झ", category: consonant }
+  - { id: 28, label: "ta",    display: "ट", category: consonant }
+  - { id: 29, label: "tha",   display: "ठ", category: consonant }
+  - { id: 30, label: "da",    display: "ड", category: consonant }
+  - { id: 31, label: "dha",   display: "ढ", category: consonant }
+  - { id: 32, label: "na",    display: "ण", category: consonant }
+  - { id: 33, label: "ta2",   display: "त", category: consonant }
+  - { id: 34, label: "tha2",  display: "थ", category: consonant }
+  - { id: 35, label: "da2",   display: "द", category: consonant }
+  - { id: 36, label: "dha2",  display: "ध", category: consonant }
+  - { id: 37, label: "na2",   display: "न", category: consonant }
+  - { id: 38, label: "pa",    display: "प", category: consonant }
+  - { id: 39, label: "pha",   display: "फ", category: consonant }
+  - { id: 40, label: "ba",    display: "ब", category: consonant }
+  - { id: 41, label: "bha",   display: "भ", category: consonant }
+  - { id: 42, label: "ma",    display: "म", category: consonant }
+  - { id: 43, label: "ya",    display: "य", category: consonant }
+  - { id: 44, label: "ra",    display: "र", category: consonant }
+  - { id: 45, label: "la",    display: "ल", category: consonant }
+
+category_order:
+  - digit
+  - vowel
+  - consonant

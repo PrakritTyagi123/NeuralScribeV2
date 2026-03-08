@@ -1,9 +1,9 @@
 """
-NeuralScribe v2 — CLI dataset preparation script.
-Standalone alternative to the Data Preparation UI tab.
+NeuralScribe v2 — CLI dataset preparation script (language-aware).
 
 Usage:
-    python backend/scripts/prepare_dataset.py --config configs/prep_v2.yaml
+    python backend/scripts/prepare_dataset.py --language english
+    python backend/scripts/prepare_dataset.py --language devanagari
 """
 
 import sys
@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from backend.utils.logging import setup_logging, get_logger
 from backend.utils.helpers import eta_string, human_readable_size
+from backend.utils.config import SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE
 from backend.services.dataset_service import DatasetService
 
 setup_logging()
@@ -47,21 +48,40 @@ def print_progress(data: dict):
         print(f"  {message}")
 
     if stage == "complete":
-        print()  # newline after progress bar
+        print()
 
 
-async def run_preparation(config_path: str):
-    """Run the dataset preparation pipeline."""
+async def run_preparation(language: str):
+    """Run the dataset preparation pipeline for a specific language."""
     log.info("=" * 60)
-    log.info("NeuralScribe v2 — Dataset Preparation")
+    log.info(f"NeuralScribe v2 — Dataset Preparation [{language.upper()}]")
     log.info("=" * 60)
 
     service = DatasetService()
 
+    # Switch to requested language
+    result = service.set_language(language)
+    if "error" in result:
+        log.error(f"Failed to set language: {result['error']}")
+        return
+
+    # Check if this is a placeholder language
+    registry = service.registry
+    if registry.status == "placeholder":
+        log.error(f"Language '{language}' is a placeholder — dataset not available yet.")
+        log.error(f"Only the following languages have full dataset support:")
+        for lang in SUPPORTED_LANGUAGES:
+            ds_temp = DatasetService()
+            ds_temp.set_language(lang)
+            status_str = "✓ Ready" if ds_temp.registry.status != "placeholder" else "✗ Placeholder"
+            log.error(f"  {lang:<15} {status_str} ({ds_temp.registry.num_classes} classes)")
+        return
+
     # Show config
     status = service.get_status()
+    log.info(f"Language:    {language}")
     log.info(f"Num classes: {status['num_classes']}")
-    log.info(f"Cache path: {status['cache_path']}")
+    log.info(f"Cache path:  {status['cache_path']}")
 
     if status["cache_exists"]:
         log.info(f"Existing cache found: {status['cache_size']}")
@@ -92,7 +112,7 @@ async def run_preparation(config_path: str):
         log.error(f"Preparation failed: {result['error']}")
         return
 
-    log.info("Dataset preparation complete!")
+    log.info(f"Dataset preparation complete for {language}!")
     log.info(f"  Total samples:  {result.get('total_samples', 0):,}")
     log.info(f"  Train samples:  {result.get('train_samples', 0):,}")
     log.info(f"  Val samples:    {result.get('val_samples', 0):,}")
@@ -106,12 +126,13 @@ async def run_preparation(config_path: str):
 def main():
     parser = argparse.ArgumentParser(description="NeuralScribe v2 — Prepare Dataset")
     parser.add_argument(
-        "--config", type=str, default="configs/prep_v2.yaml",
-        help="Path to preparation config YAML",
+        "--language", type=str, default=DEFAULT_LANGUAGE,
+        choices=SUPPORTED_LANGUAGES,
+        help=f"Language to prepare dataset for (default: {DEFAULT_LANGUAGE})",
     )
     args = parser.parse_args()
 
-    asyncio.run(run_preparation(args.config))
+    asyncio.run(run_preparation(args.language))
 
 
 if __name__ == "__main__":

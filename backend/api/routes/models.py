@@ -1,11 +1,11 @@
 """
-Model management API routes — list, load, delete, export, compare, download.
+Model management API routes — language-aware list, load, delete, export.
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict
 
 router = APIRouter()
 
@@ -16,6 +16,7 @@ def _services(request: Request):
 
 class LoadRequest(BaseModel):
     name: str
+    language: Optional[str] = None
 
 
 class CompareRequest(BaseModel):
@@ -24,15 +25,19 @@ class CompareRequest(BaseModel):
 
 
 @router.get("/list")
-async def list_models(request: Request):
-    """List all saved models."""
-    return {"models": _services(request).model_service.list_models()}
+async def list_models(request: Request, language: Optional[str] = Query(None)):
+    ms = _services(request).model_service
+    if language:
+        ms.set_language(language)
+    return {"language": ms.language, "models": ms.list_models()}
 
 
 @router.get("/metadata/{name}")
-async def model_metadata(request: Request, name: str):
-    """Get metadata for a specific model."""
-    meta = _services(request).model_service.get_model_metadata(name)
+async def model_metadata(request: Request, name: str, language: Optional[str] = Query(None)):
+    ms = _services(request).model_service
+    if language:
+        ms.set_language(language)
+    meta = ms.get_model_metadata(name)
     if meta is None:
         return {"error": f"Metadata not found for {name}"}
     return meta
@@ -40,76 +45,67 @@ async def model_metadata(request: Request, name: str):
 
 @router.post("/load")
 async def load_model(request: Request, body: LoadRequest):
-    """Load a model checkpoint for inference."""
     s = _services(request)
-    result = s.model_service.load_model(body.name)
+    if body.language:
+        s.model_service.set_language(body.language)
+        s.interface_service.set_language(body.language)
 
+    result = s.model_service.load_model(body.name)
     if "error" not in result:
-        # Set model in interface service for inference
         model = s.model_service.get_loaded_model()
         if model:
             s.interface_service.set_model(model)
-
     return result
 
 
 @router.post("/export-onnx/{name}")
-async def export_onnx(request: Request, name: str):
-    """Export a model to ONNX format."""
-    return _services(request).model_service.export_onnx(name)
+async def export_onnx(request: Request, name: str, language: Optional[str] = Query(None)):
+    ms = _services(request).model_service
+    if language:
+        ms.set_language(language)
+    return ms.export_onnx(name)
 
 
 @router.delete("/{name}")
-async def delete_model(request: Request, name: str):
-    """Delete a model and its metadata."""
-    return _services(request).model_service.delete_model(name)
+async def delete_model(request: Request, name: str, language: Optional[str] = Query(None)):
+    ms = _services(request).model_service
+    if language:
+        ms.set_language(language)
+    return ms.delete_model(name)
 
 
 @router.post("/compare")
 async def compare_models(request: Request, body: CompareRequest):
-    """Compare two models side-by-side."""
     return _services(request).model_service.compare_models(body.model_a, body.model_b)
 
 
 @router.get("/download/{name}")
 async def download_model(request: Request, name: str):
-    """Download a model .pth file."""
     path = _services(request).model_service.get_model_path(name)
     if path is None:
         return {"error": f"Model not found: {name}"}
-    return FileResponse(
-        str(path),
-        filename=path.name,
-        media_type="application/octet-stream",
-    )
+    return FileResponse(str(path), filename=path.name, media_type="application/octet-stream")
 
 
 @router.get("/download-onnx/{name}")
 async def download_onnx(request: Request, name: str):
-    """Download an ONNX export."""
     path = _services(request).model_service.get_export_path(name)
     if path is None:
         return {"error": f"ONNX export not found: {name}"}
-    return FileResponse(
-        str(path),
-        filename=f"{name}.onnx",
-        media_type="application/octet-stream",
-    )
+    return FileResponse(str(path), filename=f"{name}.onnx", media_type="application/octet-stream")
 
 
 @router.get("/loaded")
 async def loaded_model_info(request: Request):
-    """Get info about the currently loaded model."""
     s = _services(request)
     name = s.model_service.get_loaded_model_name()
     model = s.model_service.get_loaded_model()
-
     if model is None:
-        return {"loaded": False}
-
+        return {"loaded": False, "language": s.model_service.language}
     return {
         "loaded": True,
         "name": name,
+        "language": s.model_service.language,
         "n_params": model.count_parameters(),
         "num_classes": model.num_classes,
     }
@@ -117,8 +113,15 @@ async def loaded_model_info(request: Request):
 
 @router.post("/unload")
 async def unload_model(request: Request):
-    """Unload the currently loaded model from memory."""
     s = _services(request)
     s.interface_service.clear_model()
     s.model_service.unload_model()
     return {"message": "Model unloaded"}
+
+
+@router.post("/set-language")
+async def set_model_language(request: Request, body: Dict[str, str] = Body(...)):
+    language = body.get("language")
+    if not language:
+        return {"error": "language is required"}
+    return _services(request).model_service.set_language(language)

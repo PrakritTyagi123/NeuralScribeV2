@@ -1,8 +1,8 @@
 """
-Training service for NeuralScribe v2.
+NeuralScribe v2 — Training service (language-aware).
 Runs the training loop with mixed precision, cosine annealing warm restarts,
 mixup, and real-time WebSocket progress reporting.
-Single training job at a time.
+Each language has its own config, checkpoints, and training logs.
 """
 
 import time
@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
 import asyncio
 
-from ..utils.config import Config, ClassRegistry, PROJECT_ROOT
+from ..utils.config import (
+    Config, ClassRegistry, ProjectConfig, LanguagePaths,
+    PROJECT_ROOT, DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES, get_language_paths,
+)
 from ..utils.logging import get_logger
 from ..utils.helpers import timestamp_str, human_readable_size
 from ..utils.metrics import (
@@ -30,7 +33,6 @@ log = get_logger(__name__)
 
 
 def _emit_ws(ws_callback, data, main_loop=None):
-    """Helper to call async ws_callback from sync code."""
     if ws_callback is None:
         return
     try:
@@ -45,11 +47,14 @@ def _emit_ws(ws_callback, data, main_loop=None):
 
 
 class TrainingService:
-    """Manages model training lifecycle."""
+    """Manages model training lifecycle, per language."""
 
     def __init__(self):
-        self._config = Config("configs/train_v2.yaml")
-        self._registry = ClassRegistry()
+        self._project_config = ProjectConfig()
+        self._language = self._project_config.selected_language
+        self._paths = get_language_paths(self._language)
+        self._config = self._load_train_config()
+        self._registry = ClassRegistry(language=self._language)
         self._is_training = False
         self._is_paused = False
         self._stop_requested = False
@@ -60,13 +65,81 @@ class TrainingService:
         self._training_state: Dict[str, Any] = {}
 
         # Device detection
-        cuda_available = torch.cuda.is_available()
-        if cuda_available:
+        if torch.cuda.is_available():
             self._device = torch.device("cuda")
             log.info(f"CUDA available: {torch.cuda.get_device_name(0)}")
         else:
             self._device = torch.device("cpu")
             log.warning("CUDA not available — training will use CPU (slow!)")
+
+    def _load_train_config(self) -> Config:
+        config_path = self._paths.train_config
+        if config_path.exists():
+            return Config(str(config_path.relative_to(PROJECT_ROOT)))
+        return Config()
+
+    # ── Language switching ──
+
+    @property
+    def language(self) -> str:
+        return self._language
+
+    def set_language(self, language: str) -> Dict[str, Any]:
+        if language not in SUPPORTED_LANGUAGES:
+            return {"error": f"Unsupported language: {language}"}
+        if self._is_training:
+            return {"error": "Cannot switch language while training is in progress"}
+        if language == self._language:
+            return {"status": "already_set", "language": language}
+
+        self._language = language
+        self._paths = get_language_paths(language)
+        self._config = self._load_train_config()
+        self._registry = ClassRegistry(language=language)
+        self._model = None
+        self._history = self._load_training_history()
+        self._best_val_acc = 0.0
+        self._current_epoch = 0
+        self._training_state = {}
+
+        self._project_config.set_ui_state("training_language", language)
+        log.info(f"Training service switched to language: {language}")
+        return {"status": "switched", "language": language}
+
+    def _load_training_history(self) -> List[Dict[str, Any]]:
+        """Load training history from disk for current language."""
+        hist_path = self._paths.training_history
+        if hist_path.exists():
+            try:
+                with open(hist_path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return []
+        return []
+
+    def _save_training_history(self):
+        """Save training history to disk for current language."""
+        hist_path = self._paths.training_history
+        hist_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(hist_path, "w") as f:
+            json.dump(self._history, f, indent=2, default=str)
+
+        # Also save loss/accuracy graph data
+        if self._history:
+            loss_data = [{"epoch": h["epoch"], "train_loss": h.get("train_loss"), "val_loss": h.get("val_loss")} for h in self._history]
+            acc_data = [{"epoch": h["epoch"], "train_acc": h.get("train_acc"), "val_acc": h.get("val_acc")} for h in self._history]
+            table_data = [{
+                "epoch": h.get("epoch"), "train_loss": h.get("train_loss"),
+                "train_acc": h.get("train_acc"), "val_loss": h.get("val_loss"),
+                "val_acc": h.get("val_acc"), "lr": h.get("lr"),
+            } for h in self._history]
+
+            with open(self._paths.loss_graph, "w") as f:
+                json.dump(loss_data, f, indent=2)
+            with open(self._paths.accuracy_graph, "w") as f:
+                json.dump(acc_data, f, indent=2)
+            with open(self._paths.training_table, "w") as f:
+                json.dump(table_data, f, indent=2)
 
     # ── Properties ──
 
@@ -84,6 +157,8 @@ class TrainingService:
 
     @property
     def history(self) -> List[Dict[str, Any]]:
+        if not self._history:
+            self._history = self._load_training_history()
         return self._history
 
     # ── Config ──
@@ -107,6 +182,7 @@ class TrainingService:
 
     def get_status(self) -> Dict[str, Any]:
         return {
+            "language": self._language,
             "is_training": self._is_training,
             "is_paused": self._is_paused,
             "current_epoch": self._current_epoch,
@@ -140,7 +216,7 @@ class TrainingService:
             )
             return result
         except Exception as e:
-            log.error(f"Training failed: {e}", exc_info=True)
+            log.error(f"Training failed for {self._language}: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             self._is_training = False
@@ -165,27 +241,16 @@ class TrainingService:
         device = self._device
         total_epochs = cfg.get("training.epochs", 100)
 
-        # Log system info
-        import psutil
-        from ..utils.gpu_monitor import get_gpu_info
-        gpu = get_gpu_info()
-        mem = psutil.virtual_memory()
-        gpu_str = f' | GPU={gpu["name"]} {gpu["gpu_util_percent"]}% VRAM={gpu["memory_used_mb"]}/{gpu["memory_total_mb"]}MB' if gpu['available'] else ' | GPU=N/A'
-        log.info(f"System: CPU={psutil.cpu_percent()}% | RAM={mem.used // (1024**3)}/{mem.total // (1024**3)}GB ({mem.percent}%){gpu_str}")
-
-        # Build model
         model = self._build_model()
         self._model = model
-        log.info(f"Model: {model.count_parameters():,} params on {device}")
+        log.info(f"[{self._language}] Model: {model.count_parameters():,} params on {device}")
 
-        # Loss
         criterion = CombinedLoss(
             label_smoothing=cfg.get("loss.label_smoothing", 0.08),
             focal_gamma=cfg.get("loss.focal_gamma", 1.5),
             focal_weight=cfg.get("loss.focal_weight", 0.3),
         ).to(device)
 
-        # Optimizer
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=cfg.get("optimizer.lr", 0.003),
@@ -193,7 +258,6 @@ class TrainingService:
             betas=tuple(cfg.get("optimizer.betas", [0.9, 0.999])),
         )
 
-        # Scheduler — warmup then cosine restarts
         warmup_epochs = cfg.get("scheduler.warmup_epochs", 3)
         T_0 = cfg.get("scheduler.T_0", 10)
         T_mult = cfg.get("scheduler.T_mult", 2)
@@ -201,34 +265,24 @@ class TrainingService:
         warmup_start_lr = cfg.get("scheduler.warmup_start_lr", 1e-4)
         target_lr = cfg.get("optimizer.lr", 0.003)
 
-        # Build a proper sequential scheduler: linear warmup → cosine restarts
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=warmup_start_lr / target_lr,
-            end_factor=1.0,
-            total_iters=warmup_epochs,
+            optimizer, start_factor=warmup_start_lr / target_lr,
+            end_factor=1.0, total_iters=warmup_epochs,
         )
         cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer,
-            T_0=T_0,
-            T_mult=T_mult,
-            eta_min=eta_min,
+            optimizer, T_0=T_0, T_mult=T_mult, eta_min=eta_min,
         )
         scheduler = torch.optim.lr_scheduler.SequentialLR(
-            optimizer,
-            schedulers=[warmup_scheduler, cosine_scheduler],
+            optimizer, schedulers=[warmup_scheduler, cosine_scheduler],
             milestones=[warmup_epochs],
         )
 
-        # Mixed precision
         use_amp = cfg.get("mixed_precision.enabled", True) and device.type == "cuda"
         scaler = GradScaler(enabled=use_amp)
 
-        # Mixup
         mixup_alpha = cfg.get("regularization.mixup_alpha", 0.2)
         mixup_prob = cfg.get("regularization.mixup_probability", 0.5)
 
-        # Resume
         start_epoch = 0
         if resume_path:
             ckpt = torch.load(resume_path, map_location=device, weights_only=False)
@@ -241,17 +295,16 @@ class TrainingService:
             start_epoch = ckpt.get("epoch", 0) + 1
             self._best_val_acc = ckpt.get("best_val_acc", 0.0)
             self._history = ckpt.get("history", [])
-            log.info(f"Resumed from epoch {start_epoch}, best={self._best_val_acc:.4f}")
+            log.info(f"[{self._language}] Resumed from epoch {start_epoch}")
         else:
-            # Fresh run — reset history and best accuracy
             self._history = []
             self._best_val_acc = 0.0
 
-        # WS throttle
         last_ws = [0.0]
         throttle = cfg.get("logging.ws_throttle_seconds", 1.0)
 
         def emit(data):
+            data["language"] = self._language
             self._training_state = data
             now = time.time()
             if now - last_ws[0] >= throttle:
@@ -259,20 +312,18 @@ class TrainingService:
                 _emit_ws(ws_callback, data, main_loop)
 
         def emit_force(data):
+            data["language"] = self._language
             self._training_state = data
             _emit_ws(ws_callback, data, main_loop)
 
-        # Checkpoint dir
-        models_dir = PROJECT_ROOT / cfg.get("checkpointing.models_dir", "backend/models")
+        models_dir = self._paths.models_dir
         models_dir.mkdir(parents=True, exist_ok=True)
 
-        # ── Epoch loop ──
         training_start = time.time()
 
         for epoch in range(start_epoch, total_epochs):
             if self._stop_requested:
                 break
-
             while self._is_paused:
                 time.sleep(0.5)
                 if self._stop_requested:
@@ -283,7 +334,6 @@ class TrainingService:
             self._current_epoch = epoch
             epoch_start = time.time()
 
-            # ── Train one epoch ──
             model.train()
             loss_sum = 0.0
             correct = 0
@@ -293,7 +343,6 @@ class TrainingService:
             for bi, (images, targets) in enumerate(train_loader):
                 if self._stop_requested:
                     break
-
                 images = images.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
 
@@ -302,7 +351,6 @@ class TrainingService:
                     images, ya, yb, lam = mixup_data(images, targets, mixup_alpha)
 
                 optimizer.zero_grad(set_to_none=True)
-
                 with autocast(device.type, enabled=use_amp):
                     logits = model(images)
                     loss = mixup_criterion(criterion, logits, ya, yb, lam) if do_mixup else criterion(logits, targets)
@@ -335,11 +383,9 @@ class TrainingService:
                 break
 
             scheduler.step()
-
             train_loss = loss_sum / max(total, 1)
             train_acc = correct / max(total, 1)
 
-            # ── Validate ──
             val_loss, val_acc, val_per_class = self._validate(model, val_loader, criterion, device, use_amp)
 
             epoch_time = time.time() - epoch_start
@@ -363,31 +409,35 @@ class TrainingService:
             self._history.append(rec)
             emit_force(rec)
 
+            # Save training logs after each epoch
+            self._save_training_history()
+
             log.info(
-                f"Epoch {epoch + 1}/{total_epochs} — "
-                f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
-                f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} "
-                f"lr={optimizer.param_groups[0]['lr']:.6f}"
+                f"[{self._language}] Epoch {epoch + 1}/{total_epochs} — "
+                f"train_loss={train_loss:.4f} val_acc={val_acc:.4f}"
                 f"{' ★ BEST' if is_best else ''}"
             )
 
-            # Checkpoint
             self._save_checkpoint(
                 model, optimizer, scheduler, scaler,
                 epoch, train_loss, val_loss, val_acc,
                 is_best, models_dir, cfg, val_per_class,
             )
 
-        # ── Done ──
         total_time = time.time() - training_start
         result = {
             "type": "training_complete",
+            "language": self._language,
             "status": "stopped" if self._stop_requested else "complete",
             "epochs_run": self._current_epoch - start_epoch + 1,
             "best_val_acc": round(self._best_val_acc, 4),
             "total_time_seconds": round(total_time, 1),
         }
         emit_force(result)
+
+        # Save final history
+        self._save_training_history()
+
         return result
 
     # ── Validation ──
@@ -395,44 +445,31 @@ class TrainingService:
     def _validate(self, model, val_loader, criterion, device, use_amp):
         model.eval()
         loss_sum = 0.0
-        all_preds = []
-        all_targets = []
-
+        all_preds, all_targets = [], []
         with torch.no_grad():
             for images, targets in val_loader:
                 images = images.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
                 with autocast(device.type, enabled=use_amp):
-                    # Use the same criterion as training for consistent
-                    # train/val loss comparison.
                     logits = model(images)
                     loss = criterion(logits, targets)
                 loss_sum += loss.item() * images.size(0)
                 _, pred = logits.max(1)
                 all_preds.append(pred.cpu().numpy())
                 all_targets.append(targets.cpu().numpy())
-
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
-
         val_loss = loss_sum / max(len(all_targets), 1)
         val_acc = compute_overall_accuracy(all_targets, all_preds)
-
         per_class = {}
         if self._config.get("validation.per_class_metrics", True):
             per_class = compute_per_class_metrics(all_targets, all_preds, self._registry.num_classes)
-
         return val_loss, val_acc, per_class
 
-    # ── State reset ──
+    # ── Reset ──
 
     def reset(self) -> None:
-        """
-        Reset training-related state while not actively training.
-        Intended for maintenance endpoints like /system/clear-all.
-        """
         if self._is_training:
-            # Do not silently reset while a run is in progress.
             return
         self._current_epoch = 0
         self._best_val_acc = 0.0
@@ -442,11 +479,9 @@ class TrainingService:
 
     # ── Checkpointing ──
 
-    def _save_checkpoint(
-        self, model, optimizer, scheduler, scaler,
-        epoch, train_loss, val_loss, val_acc,
-        is_best, models_dir, cfg, val_per_class,
-    ):
+    def _save_checkpoint(self, model, optimizer, scheduler, scaler,
+                         epoch, train_loss, val_loss, val_acc,
+                         is_best, models_dir, cfg, val_per_class):
         save_interval = cfg.get("checkpointing.save_interval", 10)
         save_best = cfg.get("checkpointing.save_best", True)
         max_ckpts = cfg.get("checkpointing.max_checkpoints", 5)
@@ -470,46 +505,41 @@ class TrainingService:
             "history": self._history,
             "config": cfg.to_dict(),
             "num_classes": self._registry.num_classes,
+            "language": self._language,
         }
 
-        # Save best
         if is_best and save_best:
             best_path = models_dir / "best_model.pth"
             torch.save(ckpt_data, best_path)
-            log.info(f"Saved best model: val_acc={val_acc:.4f}")
-
+            log.info(f"[{self._language}] Saved best model: val_acc={val_acc:.4f}")
             meta = {
-                "name": f"best_v2_{ts}", "epoch": epoch,
+                "name": f"best_{self._language}_{ts}", "epoch": epoch,
                 "train_loss": round(train_loss, 4), "val_loss": round(val_loss, 4),
                 "val_acc": round(val_acc, 4), "n_params": model.count_parameters(),
-                "num_classes": self._registry.num_classes, "timestamp": ts,
-                "per_class_metrics": {str(k): v for k, v in val_per_class.items()},
+                "num_classes": self._registry.num_classes, "language": self._language,
+                "timestamp": ts,
             }
             with open(models_dir / "metadata_best_model.json", "w") as f:
                 json.dump(meta, f, indent=2, default=str)
+            self._project_config.set_language_config(self._language, "last_model", "best_model")
 
-        # Save periodic
         if should_save_periodic:
-            name = f"model_v2_{ts}_epoch_{epoch}"
-            ckpt_path = models_dir / f"{name}.pth"
-            torch.save(ckpt_data, ckpt_path)
-            log.info(f"Saved checkpoint: {name}")
-
+            name = f"model_{self._language}_{ts}_epoch_{epoch}"
+            torch.save(ckpt_data, models_dir / f"{name}.pth")
             meta = {
                 "name": name, "epoch": epoch,
                 "train_loss": round(train_loss, 4), "val_loss": round(val_loss, 4),
                 "val_acc": round(val_acc, 4), "n_params": model.count_parameters(),
-                "num_classes": self._registry.num_classes, "timestamp": ts,
-                "file": f"{name}.pth",
-                "size": human_readable_size(ckpt_path.stat().st_size),
+                "num_classes": self._registry.num_classes, "language": self._language,
+                "timestamp": ts, "file": f"{name}.pth",
+                "size": human_readable_size((models_dir / f"{name}.pth").stat().st_size),
             }
             with open(models_dir / f"metadata_{name}.json", "w") as f:
                 json.dump(meta, f, indent=2, default=str)
-
             self._update_model_index(models_dir, meta)
             self._prune_checkpoints(models_dir, max_ckpts)
 
-    def _update_model_index(self, models_dir: Path, meta: Dict):
+    def _update_model_index(self, models_dir, meta):
         index_path = models_dir / "index.json"
         index = []
         if index_path.exists():
@@ -518,30 +548,26 @@ class TrainingService:
                     index = json.load(f)
             except Exception:
                 index = []
-
         index.append({
             "name": meta["name"], "epoch": meta["epoch"],
             "val_acc": meta["val_acc"], "timestamp": meta["timestamp"],
             "file": meta.get("file", ""), "size": meta.get("size", ""),
         })
-
         with open(index_path, "w") as f:
             json.dump(index, f, indent=2)
 
-    def _prune_checkpoints(self, models_dir: Path, max_keep: int):
-        ckpts = sorted(models_dir.glob("model_v2_*.pth"), key=lambda p: p.stat().st_mtime)
+    def _prune_checkpoints(self, models_dir, max_keep):
+        ckpts = sorted(models_dir.glob(f"model_{self._language}_*.pth"), key=lambda p: p.stat().st_mtime)
         while len(ckpts) > max_keep:
             oldest = ckpts.pop(0)
             oldest.unlink(missing_ok=True)
             meta = models_dir / f"metadata_{oldest.stem}.json"
             meta.unlink(missing_ok=True)
-            log.info(f"Pruned old checkpoint: {oldest.name}")
 
-    # ── Evaluation (standalone) ──
+    # ── Evaluation ──
 
     def evaluate(self, test_loader, model_path: Optional[str] = None) -> Dict[str, Any]:
         device = self._device
-
         if model_path:
             model = self._build_model()
             ckpt = torch.load(model_path, map_location=device, weights_only=False)
@@ -553,7 +579,6 @@ class TrainingService:
 
         model.eval()
         all_preds, all_targets = [], []
-
         with torch.no_grad():
             for images, targets in test_loader:
                 images = images.to(device, non_blocking=True)
@@ -561,7 +586,6 @@ class TrainingService:
                 _, pred = logits.max(1)
                 all_preds.append(pred.cpu().numpy())
                 all_targets.append(targets.numpy())
-
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
 
@@ -570,13 +594,11 @@ class TrainingService:
         display_map = self._registry.get_display_map()
 
         return {
+            "language": self._language,
             "overall_accuracy": round(compute_overall_accuracy(all_targets, all_preds), 4),
             "per_class_metrics": compute_per_class_metrics(all_targets, all_preds, nc),
             "confusion_matrix": cm.tolist(),
-            "top_confusions": top_confusion_pairs(
-                cm, k=self._config.get("validation.top_confusions", 10),
-                id_to_display=display_map,
-            ),
+            "top_confusions": top_confusion_pairs(cm, k=10, id_to_display=display_map),
             "category_accuracy": compute_category_accuracy(
                 all_targets, all_preds,
                 {c["id"]: c["category"] for c in self._registry.classes},

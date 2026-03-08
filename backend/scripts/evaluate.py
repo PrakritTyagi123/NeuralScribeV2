@@ -1,10 +1,9 @@
 """
-NeuralScribe v2 — CLI evaluation script.
-Runs full evaluation on the test set and prints detailed metrics.
+NeuralScribe v2 — CLI evaluation script (language-aware).
 
 Usage:
-    python backend/scripts/evaluate.py
-    python backend/scripts/evaluate.py --model backend/models/best_model.pth
+    python backend/scripts/evaluate.py --language english
+    python backend/scripts/evaluate.py --language english --model models/english/best_model.pth
 """
 
 import sys
@@ -16,7 +15,7 @@ import json
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from backend.utils.logging import setup_logging, get_logger
-from backend.utils.config import ClassRegistry
+from backend.utils.config import SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, get_language_paths
 from backend.services.dataset_service import DatasetService
 from backend.services.training_service import TrainingService
 
@@ -25,7 +24,6 @@ log = get_logger("evaluate")
 
 
 def print_category_accuracy(cat_acc: dict):
-    """Pretty-print category accuracy table."""
     print()
     print(f"  {'Category':<20} {'Accuracy':>10} {'Correct':>10} {'Total':>10}")
     print(f"  {'─' * 20} {'─' * 10} {'─' * 10} {'─' * 10}")
@@ -35,7 +33,6 @@ def print_category_accuracy(cat_acc: dict):
 
 
 def print_top_confusions(confusions: list, n: int = 10):
-    """Pretty-print top confusion pairs."""
     print()
     print(f"  {'True':<10} {'Predicted':<10} {'Count':>8}")
     print(f"  {'─' * 10} {'─' * 10} {'─' * 8}")
@@ -43,8 +40,7 @@ def print_top_confusions(confusions: list, n: int = 10):
         print(f"  {c['true_label']:<10} {c['pred_label']:<10} {c['count']:>8,}")
 
 
-def print_worst_classes(per_class: dict, registry: ClassRegistry, n: int = 10):
-    """Print the N worst-performing classes by F1."""
+def print_worst_classes(per_class: dict, registry, n: int = 10):
     items = []
     for class_id_str, metrics in per_class.items():
         class_id = int(class_id_str)
@@ -58,7 +54,6 @@ def print_worst_classes(per_class: dict, registry: ClassRegistry, n: int = 10):
                 "recall": metrics["recall"],
                 "support": metrics["support"],
             })
-
     items.sort(key=lambda x: x["f1"])
 
     print()
@@ -75,38 +70,40 @@ def print_worst_classes(per_class: dict, registry: ClassRegistry, n: int = 10):
 def main():
     parser = argparse.ArgumentParser(description="NeuralScribe v2 — Evaluate Model")
     parser.add_argument(
+        "--language", type=str, default=DEFAULT_LANGUAGE,
+        choices=SUPPORTED_LANGUAGES,
+        help=f"Language to evaluate (default: {DEFAULT_LANGUAGE})",
+    )
+    parser.add_argument(
         "--model", type=str, default=None,
-        help="Path to model .pth file (default: uses currently loaded or best_model)",
+        help="Path to model .pth file (default: models/<language>/best_model.pth)",
     )
-    parser.add_argument(
-        "--batch-size", type=int, default=256,
-        help="Batch size for evaluation",
-    )
-    parser.add_argument(
-        "--save-report", type=str, default=None,
-        help="Save evaluation report as JSON to this path",
-    )
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--save-report", type=str, default=None)
     args = parser.parse_args()
 
+    language = args.language
+
     log.info("=" * 60)
-    log.info("NeuralScribe v2 — Evaluation")
+    log.info(f"NeuralScribe v2 — Evaluation [{language.upper()}]")
     log.info("=" * 60)
 
-    # Load dataset
+    # Load dataset for language
     ds = DatasetService()
+    ds.set_language(language)
     status = ds.get_status()
 
     if not status["cache_exists"]:
-        log.error("Dataset not prepared! Run prepare_dataset.py first.")
+        log.error(f"Dataset not prepared for {language}! Run prepare_dataset.py --language {language} first.")
         return
 
     registry = ds.registry
+    log.info(f"Language:    {language}")
+    log.info(f"Num classes: {registry.num_classes}")
 
     # Create test loader
-    test_loader = ds.get_dataloader(
-        "test", batch_size=args.batch_size,
-        num_workers=2, pin_memory=True, shuffle=False,
-    )
+    test_loader = ds.get_dataloader("test", batch_size=args.batch_size,
+                                     num_workers=2, pin_memory=True, shuffle=False)
     if test_loader is None:
         log.error("Failed to create test dataloader.")
         return
@@ -115,9 +112,18 @@ def main():
 
     # Evaluate
     ts = TrainingService()
-    model_path = args.model or str(
-        ds._prep_config.resolve_path("backend/models/best_model.pth")
-    )
+    ts.set_language(language)
+
+    # Resolve model path
+    model_path = args.model
+    if model_path is None:
+        paths = get_language_paths(language)
+        default_model = paths.models_dir / "best_model.pth"
+        if default_model.exists():
+            model_path = str(default_model)
+        else:
+            log.error(f"No best_model.pth found for {language}. Train a model first or specify --model.")
+            return
 
     log.info(f"Evaluating model: {model_path}")
     print()
@@ -128,20 +134,18 @@ def main():
         log.error(f"Evaluation failed: {result['error']}")
         return
 
-    # ── Print results ──
+    # Print results
     print("=" * 60)
+    print(f"  Language:         {language}")
     print(f"  Overall Accuracy: {result['overall_accuracy'] * 100:.2f}%")
     print(f"  Total Samples:    {result['total_samples']:,}")
 
-    # Category accuracy
     print("\n  ── Accuracy by Category ──")
     print_category_accuracy(result["category_accuracy"])
 
-    # Top confusions
     print("\n  ── Top Confusion Pairs ──")
     print_top_confusions(result["top_confusions"])
 
-    # Worst classes
     print("\n  ── Worst Performing Classes (by F1) ──")
     print_worst_classes(result["per_class_metrics"], registry)
 
@@ -150,8 +154,8 @@ def main():
 
     # Save report
     if args.save_report:
-        # Convert numpy types for JSON serialization
         report = {
+            "language": language,
             "overall_accuracy": result["overall_accuracy"],
             "total_samples": result["total_samples"],
             "category_accuracy": result["category_accuracy"],

@@ -1,0 +1,63 @@
+# NeuralScribe v2 — Cyrillic Class Registry
+# Characters: Russian Cyrillic uppercase + digits
+# Total: 43 classes (placeholder — will expand with dataset)
+# Source: Custom or Cyrillic handwriting datasets
+#
+# STATUS: PLACEHOLDER — dataset integration pending
+
+version: 2
+language: cyrillic
+total_classes: 43
+status: placeholder
+
+classes:
+  # ── Digits (0–9) ──
+  - { id: 0,  label: "0", display: "0", category: digit }
+  - { id: 1,  label: "1", display: "1", category: digit }
+  - { id: 2,  label: "2", display: "2", category: digit }
+  - { id: 3,  label: "3", display: "3", category: digit }
+  - { id: 4,  label: "4", display: "4", category: digit }
+  - { id: 5,  label: "5", display: "5", category: digit }
+  - { id: 6,  label: "6", display: "6", category: digit }
+  - { id: 7,  label: "7", display: "7", category: digit }
+  - { id: 8,  label: "8", display: "8", category: digit }
+  - { id: 9,  label: "9", display: "9", category: digit }
+
+  # ── Russian Uppercase (А–Я) ──
+  - { id: 10, label: "A_cy",  display: "А", category: uppercase }
+  - { id: 11, label: "B_cy",  display: "Б", category: uppercase }
+  - { id: 12, label: "V_cy",  display: "В", category: uppercase }
+  - { id: 13, label: "G_cy",  display: "Г", category: uppercase }
+  - { id: 14, label: "D_cy",  display: "Д", category: uppercase }
+  - { id: 15, label: "Ye_cy", display: "Е", category: uppercase }
+  - { id: 16, label: "Zh_cy", display: "Ж", category: uppercase }
+  - { id: 17, label: "Z_cy",  display: "З", category: uppercase }
+  - { id: 18, label: "I_cy",  display: "И", category: uppercase }
+  - { id: 19, label: "Y_cy",  display: "Й", category: uppercase }
+  - { id: 20, label: "K_cy",  display: "К", category: uppercase }
+  - { id: 21, label: "L_cy",  display: "Л", category: uppercase }
+  - { id: 22, label: "M_cy",  display: "М", category: uppercase }
+  - { id: 23, label: "N_cy",  display: "Н", category: uppercase }
+  - { id: 24, label: "O_cy",  display: "О", category: uppercase }
+  - { id: 25, label: "P_cy",  display: "П", category: uppercase }
+  - { id: 26, label: "R_cy",  display: "Р", category: uppercase }
+  - { id: 27, label: "S_cy",  display: "С", category: uppercase }
+  - { id: 28, label: "T_cy",  display: "Т", category: uppercase }
+  - { id: 29, label: "U_cy",  display: "У", category: uppercase }
+  - { id: 30, label: "F_cy",  display: "Ф", category: uppercase }
+  - { id: 31, label: "Kh_cy", display: "Х", category: uppercase }
+  - { id: 32, label: "Ts_cy", display: "Ц", category: uppercase }
+  - { id: 33, label: "Ch_cy", display: "Ч", category: uppercase }
+  - { id: 34, label: "Sh_cy", display: "Ш", category: uppercase }
+  - { id: 35, label: "Sch_cy",display: "Щ", category: uppercase }
+  - { id: 36, label: "Tvr_cy",display: "Ъ", category: uppercase }
+  - { id: 37, label: "Yer_cy",display: "Ы", category: uppercase }
+  - { id: 38, label: "Myg_cy",display: "Ь", category: uppercase }
+  - { id: 39, label: "E_cy",  display: "Э", category: uppercase }
+  - { id: 40, label: "Yu_cy", display: "Ю", category: uppercase }
+  - { id: 41, label: "Ya_cy", display: "Я", category: uppercase }
+  - { id: 42, label: "Yo_cy", display: "Ё", category: uppercase }
+
+category_order:
+  - digit
+  - uppercase

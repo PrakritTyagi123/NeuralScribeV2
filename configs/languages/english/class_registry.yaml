@@ -1,0 +1,60 @@
+# NeuralScribe v2 — English Class Registry
+# Characters: 0-9 digits + A-Z uppercase letters
+# Total: 36 classes
+# Source: EMNIST Balanced (digits + uppercase subset)
+
+version: 2
+language: english
+total_classes: 36
+
+classes:
+  # ── Digits (0–9) ──
+  - { id: 0,  label: "0", display: "0", category: digit }
+  - { id: 1,  label: "1", display: "1", category: digit }
+  - { id: 2,  label: "2", display: "2", category: digit }
+  - { id: 3,  label: "3", display: "3", category: digit }
+  - { id: 4,  label: "4", display: "4", category: digit }
+  - { id: 5,  label: "5", display: "5", category: digit }
+  - { id: 6,  label: "6", display: "6", category: digit }
+  - { id: 7,  label: "7", display: "7", category: digit }
+  - { id: 8,  label: "8", display: "8", category: digit }
+  - { id: 9,  label: "9", display: "9", category: digit }
+
+  # ── Uppercase Latin (A–Z) ──
+  - { id: 10, label: "A", display: "A", category: uppercase }
+  - { id: 11, label: "B", display: "B", category: uppercase }
+  - { id: 12, label: "C", display: "C", category: uppercase }
+  - { id: 13, label: "D", display: "D", category: uppercase }
+  - { id: 14, label: "E", display: "E", category: uppercase }
+  - { id: 15, label: "F", display: "F", category: uppercase }
+  - { id: 16, label: "G", display: "G", category: uppercase }
+  - { id: 17, label: "H", display: "H", category: uppercase }
+  - { id: 18, label: "I", display: "I", category: uppercase }
+  - { id: 19, label: "J", display: "J", category: uppercase }
+  - { id: 20, label: "K", display: "K", category: uppercase }
+  - { id: 21, label: "L", display: "L", category: uppercase }
+  - { id: 22, label: "M", display: "M", category: uppercase }
+  - { id: 23, label: "N", display: "N", category: uppercase }
+  - { id: 24, label: "O", display: "O", category: uppercase }
+  - { id: 25, label: "P", display: "P", category: uppercase }
+  - { id: 26, label: "Q", display: "Q", category: uppercase }
+  - { id: 27, label: "R", display: "R", category: uppercase }
+  - { id: 28, label: "S", display: "S", category: uppercase }
+  - { id: 29, label: "T", display: "T", category: uppercase }
+  - { id: 30, label: "U", display: "U", category: uppercase }
+  - { id: 31, label: "V", display: "V", category: uppercase }
+  - { id: 32, label: "W", display: "W", category: uppercase }
+  - { id: 33, label: "X", display: "X", category: uppercase }
+  - { id: 34, label: "Y", display: "Y", category: uppercase }
+  - { id: 35, label: "Z", display: "Z", category: uppercase }
+
+emnist_split: "balanced"
+
+# EMNIST balanced class mapping for English:
+# EMNIST idx 0-9  → digits 0-9 (our id 0-9)
+# EMNIST idx 10-35 → uppercase A-Z (our id 10-35)
+# All other EMNIST classes (lowercase, merged) are IGNORED
+
+category_order:
+  - digit
+  - uppercase
