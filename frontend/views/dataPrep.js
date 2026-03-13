@@ -1,6 +1,7 @@
-/** Data Preparation view — fits viewport, no page scroll. */
+/** Data Preparation view — language-aware, fits viewport. */
 import { createProgressBar, updateProgressBar } from '../components/progressBar.js';
 import { createLogConsole, appendLog } from '../components/logConsole.js';
+import { createLanguageDropdown } from '../components/languageDropdown.js';
 import { onWsEvent } from '../src/ws.js';
 import { showToast } from '../components/toast.js';
 
@@ -20,7 +21,26 @@ export async function renderDataPrep(container) {
     title.textContent = 'Data Preparation';
     container.appendChild(title);
 
-    // ── Top row: config + progress (fixed height) ──
+    // ── Language toolbar ──
+    const toolbar = document.createElement('div');
+    toolbar.className = 'lang-toolbar';
+    container.appendChild(toolbar);
+
+    let logConsole; // declare early for use in dropdown callback
+
+    const langDropdown = await createLanguageDropdown(async (language) => {
+        // Switch backend language
+        await fetch('/api/dataset/set-language', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ language }),
+        });
+        // Reload status
+        await reloadStatus();
+    }, 'prep_language');
+    toolbar.appendChild(langDropdown.element);
+
+    // ── Top row: config + progress ──
     const topRow = document.createElement('div');
     topRow.className = 'grid-2';
     topRow.style.cssText = 'flex-shrink:0;';
@@ -34,27 +54,18 @@ export async function renderDataPrep(container) {
         <div class="panel-header">Configuration</div>
         <div class="panel-body" style="padding:8px;">
             <div class="form-group" style="margin-bottom:4px;">
-                <label>EMNIST Split</label>
-                <input type="text" value="balanced" disabled style="padding:2px 4px;">
-                <div class="text-sm text-muted">Balanced split — 47 base classes. Auto-downloads ~550MB first run.</div>
-            </div>
-            <div class="form-group" style="margin-bottom:4px;">
-                <label>Synthetic Generation</label>
-                <select id="prep-synthetic" style="padding:2px 4px;">
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                </select>
-                <div class="text-sm text-muted">Font-rendered Greek, math, and other symbols not in EMNIST.</div>
-            </div>
-            <div class="form-group" style="margin-bottom:4px;">
-                <label>Samples per Symbol</label>
-                <input type="number" id="prep-samples" value="1500" style="padding:2px 4px;">
-                <div class="text-sm text-muted">Synthetic samples per non-EMNIST symbol. More = better but slower.</div>
+                <label>Dataset Source</label>
+                <input type="text" id="prep-source" value="EMNIST Balanced" disabled style="padding:2px 4px;">
+                <div class="text-sm text-muted">Source dataset for current language. Auto-downloads on first run.</div>
             </div>
             <div class="form-group" style="margin-bottom:4px;">
                 <label>Augmentation Factor</label>
                 <input type="number" id="prep-augfactor" value="3" style="padding:2px 4px;">
                 <div class="text-sm text-muted">Multiplier for augmentations (rotation, shear, elastic).</div>
+            </div>
+            <div class="form-group" style="margin-bottom:4px;">
+                <label>Classes</label>
+                <span id="prep-classes" class="text-sm text-muted">--</span>
             </div>
             <div class="btn-group mt-8">
                 <button class="btn btn-primary" id="prep-start">Start Preparation</button>
@@ -74,11 +85,10 @@ export async function renderDataPrep(container) {
     progressBody.style.padding = '8px';
 
     const stages = [
-        { id: 'emnist', label: '1. Loading EMNIST' },
-        { id: 'synthetic', label: '2. Generating Synthetic' },
-        { id: 'preprocessing', label: '3. Preprocessing' },
-        { id: 'augmentation', label: '4. Augmentation' },
-        { id: 'splitting', label: '5. Split & Cache' },
+        { id: 'emnist', label: '1. Loading Dataset' },
+        { id: 'preprocessing', label: '2. Preprocessing' },
+        { id: 'augmentation', label: '3. Augmentation' },
+        { id: 'splitting', label: '4. Split & Cache' },
     ];
 
     const stageBars = {};
@@ -99,26 +109,38 @@ export async function renderDataPrep(container) {
     progressPanel.appendChild(progressBody);
     topRow.appendChild(progressPanel);
 
-    // ── Log panel (fills remaining space) ──
+    // ── Log panel ──
     const logPanel = document.createElement('div');
     logPanel.className = 'panel';
     logPanel.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;';
     logPanel.innerHTML = `<div class="panel-header" style="flex-shrink:0;">Log</div>`;
-    const logConsole = createLogConsole();
+    logConsole = createLogConsole();
     logConsole.style.cssText = 'flex:1;height:auto;min-height:0;border:none;overflow-y:auto;';
     logPanel.appendChild(logConsole);
     container.appendChild(logPanel);
 
-    // ── Load status ──
-    try {
-        const res = await fetch('/api/dataset/status');
-        const status = await res.json();
-        if (status.cache_exists) {
-            appendLog(logConsole, `Cache exists: ${status.cache_size} (${status.num_classes} classes)`);
-        } else {
-            appendLog(logConsole, 'No cache found. Click Start to prepare dataset.');
-        }
-    } catch (e) { appendLog(logConsole, 'Cannot reach backend.'); }
+    // ── Load status for current language ──
+    async function reloadStatus() {
+        try {
+            const lang = langDropdown.getValue();
+            const res = await fetch(`/api/dataset/status?language=${lang}`);
+            const status = await res.json();
+            const classesEl = container.querySelector('#prep-classes');
+            if (classesEl) classesEl.textContent = `${status.num_classes} classes (${lang})`;
+            if (status.cache_exists) {
+                appendLog(logConsole, `[${lang}] Cache exists: ${status.cache_size} (${status.num_classes} classes)`);
+            } else {
+                appendLog(logConsole, `[${lang}] No cache found. Click Start to prepare dataset.`);
+            }
+            if (status.registry_status === 'placeholder') {
+                appendLog(logConsole, `[${lang}] ⚠ This language is a placeholder — dataset not available yet.`);
+                container.querySelector('#prep-start').disabled = true;
+            } else {
+                container.querySelector('#prep-start').disabled = false;
+            }
+        } catch (e) { appendLog(logConsole, 'Cannot reach backend.'); }
+    }
+    await reloadStatus();
 
     // ── System polling ──
     async function pollSys() {
@@ -126,7 +148,7 @@ export async function renderDataPrep(container) {
             const [gpuRes, sysRes] = await Promise.all([fetch('/api/system/gpu'), fetch('/api/system/stats')]);
             const gpu = await gpuRes.json();
             const sys = await sysRes.json();
-            sysInfo.innerHTML = `<strong>CPU:</strong> ${sys.cpu_percent}% | <strong>RAM:</strong> ${sys.ram_used_gb}/${sys.ram_total_gb}GB (${sys.ram_percent}%) | <strong>Disk:</strong> ${sys.disk_used_gb}/${sys.disk_total_gb}GB${gpu.available ? ` | <strong>GPU:</strong> ${gpu.gpu_util_percent}% | <strong>VRAM:</strong> ${gpu.memory_used_mb}MB` : ''}`;
+            sysInfo.innerHTML = `<strong>CPU:</strong> ${sys.cpu_percent}% | <strong>RAM:</strong> ${sys.ram_used_gb}/${sys.ram_total_gb}GB${gpu.available ? ` | <strong>GPU:</strong> ${gpu.gpu_util_percent}% VRAM:${gpu.memory_used_mb}MB` : ''}`;
         } catch (e) {}
     }
     pollSys();
@@ -141,27 +163,24 @@ export async function renderDataPrep(container) {
         cancelBtn.disabled = false;
         Object.values(stageBars).forEach(bar => updateProgressBar(bar, 0, 'Waiting'));
 
-        // Send config overrides from form
-        const samplesVal = parseInt(container.querySelector('#prep-samples').value) || 1500;
         const augVal = parseInt(container.querySelector('#prep-augfactor').value) || 3;
-        const synthVal = container.querySelector('#prep-synthetic').value === 'true';
+        const lang = langDropdown.getValue();
 
-        appendLog(logConsole, `Starting: synthetic=${synthVal}, samples=${samplesVal}, augment=${augVal}`);
+        appendLog(logConsole, `[${lang}] Starting preparation, augment factor=${augVal}`);
         try {
-            // Update config first
-            await fetch('/api/dataset/config', {
+            const res = await fetch('/api/dataset/prepare', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    'synthetic.enabled': synthVal,
-                    'synthetic.samples_per_symbol': samplesVal,
-                    'augmentation.precompute': true,
-                    'augmentation.precompute_factor': augVal,
-                }),
+                body: JSON.stringify({ language: lang, overrides: { 'augmentation.precompute_factor': augVal } }),
             });
-            const res = await fetch('/api/dataset/prepare', { method: 'POST' });
             const data = await res.json();
-            appendLog(logConsole, data.message || JSON.stringify(data));
+            if (data.error) {
+                appendLog(logConsole, `Error: ${data.error}`);
+                startBtn.disabled = false;
+                cancelBtn.disabled = true;
+            } else {
+                appendLog(logConsole, data.message || JSON.stringify(data));
+            }
         } catch (e) {
             appendLog(logConsole, `Error: ${e.message}`);
             startBtn.disabled = false;
@@ -177,7 +196,7 @@ export async function renderDataPrep(container) {
     // ── WS events ──
     const stageMap = {
         'loading_emnist': 'emnist',
-        'generating_synthetic': 'synthetic',
+        'generating_synthetic': 'emnist',
         'merging': 'preprocessing',
         'preprocessing': 'preprocessing',
         'augmenting': 'augmentation',
@@ -196,7 +215,7 @@ export async function renderDataPrep(container) {
             if (data.eta_seconds) text += ` | ETA ${Math.round(data.eta_seconds)}s`;
             updateProgressBar(stageBars[stageKey], pct, text);
 
-            const order = ['emnist', 'synthetic', 'preprocessing', 'augmentation', 'splitting'];
+            const order = ['emnist', 'preprocessing', 'augmentation', 'splitting'];
             const idx = order.indexOf(stageKey);
             for (let i = 0; i < idx; i++) updateProgressBar(stageBars[order[i]], 100, 'Complete');
         }
@@ -208,6 +227,7 @@ export async function renderDataPrep(container) {
         startBtn.disabled = false;
         cancelBtn.disabled = true;
         appendLog(logConsole, `Complete! ${data.total_samples?.toLocaleString()} samples, ${data.cache_size}`);
-        showToast('Dataset preparation complete!');
+        showToast(`Dataset ready for ${data.language || 'current language'}!`);
+        langDropdown.refresh();
     }));
 }

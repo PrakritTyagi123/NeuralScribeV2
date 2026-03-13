@@ -1,8 +1,25 @@
-/** Model Manager — list, load, unload, export, delete, clear all. */
+/** Model Manager — language-aware list, load, unload, export, delete. */
+import { createLanguageDropdown } from '../components/languageDropdown.js';
 import { showToast } from '../components/toast.js';
 
 export async function renderModelManager(container) {
     container.innerHTML = `<div class="view-title">Model Manager</div>`;
+
+    // ── Language toolbar ──
+    const toolbar = document.createElement('div');
+    toolbar.className = 'lang-toolbar';
+    container.appendChild(toolbar);
+
+    const langDropdown = await createLanguageDropdown(async (language) => {
+        await fetch('/api/models/set-language', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ language }),
+        });
+        await loadModelList(tableBody, detailBody, loadedInfo);
+        await refreshLoadedInfo(loadedInfo);
+    }, 'inference_language');
+    toolbar.appendChild(langDropdown.element);
 
     // ── Action bar ──
     const actionBar = document.createElement('div');
@@ -45,31 +62,27 @@ export async function renderModelManager(container) {
     await refreshLoadedInfo(loadedInfo);
     await loadModelList(tableBody, detailBody, loadedInfo);
 
-    // ── Unload button ──
+    // ── Buttons ──
     container.querySelector('#mm-unload').addEventListener('click', async () => {
         try {
             const res = await fetch('/api/models/unload', { method: 'POST' });
             const data = await res.json();
             showToast(data.message || data.error || 'Model unloaded');
             await refreshLoadedInfo(loadedInfo);
-        } catch (e) {
-            showToast('Failed to unload');
-        }
+        } catch (e) { showToast('Failed to unload'); }
     });
 
-    // ── Clear all data ──
     container.querySelector('#mm-clear-all').addEventListener('click', async () => {
-        if (!confirm('This will delete ALL saved models and cached dataset. Are you sure?')) return;
-        if (!confirm('Really? This cannot be undone.')) return;
+        const lang = langDropdown.getValue();
+        if (!confirm(`This will delete all models and cached dataset for ${lang}. Are you sure?`)) return;
         try {
             const res = await fetch('/api/system/clear-all', { method: 'POST' });
             const data = await res.json();
-            showToast(data.message || 'All data cleared');
+            showToast(data.message || 'Cleared');
             await loadModelList(tableBody, detailBody, loadedInfo);
             await refreshLoadedInfo(loadedInfo);
-        } catch (e) {
-            showToast('Failed to clear');
-        }
+            langDropdown.refresh();
+        } catch (e) { showToast('Failed to clear'); }
     });
 }
 
@@ -78,8 +91,8 @@ async function refreshLoadedInfo(el) {
         const res = await fetch('/api/inference/status');
         const data = await res.json();
         el.innerHTML = data.ready
-            ? `<strong>Loaded:</strong> ${data.loaded_model || 'unknown'} — ready for inference`
-            : '<span class="text-muted">No model loaded</span>';
+            ? `<strong>Loaded:</strong> ${data.loaded_model || 'unknown'} (${data.language || '--'}) — ready for inference`
+            : `<span class="text-muted">No model loaded (${data.language || '--'})</span>`;
     } catch (e) {
         el.innerHTML = '<span class="text-muted">Cannot reach backend</span>';
     }
@@ -100,9 +113,10 @@ async function loadModelList(tableBody, detailBody, loadedInfo) {
         const res = await fetch('/api/models/list');
         const data = await res.json();
         const models = data.models || [];
+        const lang = data.language || '';
 
         if (models.length === 0) {
-            tableBody.innerHTML = '<div class="text-sm text-muted">No models saved yet. Train a model first.</div>';
+            tableBody.innerHTML = `<div class="text-sm text-muted">No models saved for ${lang}. Train a model first.</div>`;
             return;
         }
 
@@ -153,7 +167,7 @@ async function loadModelList(tableBody, detailBody, loadedInfo) {
                 if (action === 'export') {
                     btn.disabled = true; btn.textContent = '...';
                     const res = await fetch(`/api/models/export-onnx/${name}`, { method: 'POST' });
-                    showToast((await res.json()).error || `Exported to ONNX`);
+                    showToast((await res.json()).error || 'Exported to ONNX');
                     btn.disabled = false; btn.textContent = 'ONNX';
                 }
                 if (action === 'download') window.open(`/api/models/download/${name}`, '_blank');
@@ -183,6 +197,7 @@ function renderModelDetail(detailBody, meta) {
     detailBody.innerHTML = `
         <div class="grid-3">
             <div><strong>Name:</strong> ${meta.name || '--'}</div>
+            <div><strong>Language:</strong> ${meta.language || '--'}</div>
             <div><strong>Saved:</strong> ${formatTimestamp(meta.timestamp)}</div>
             <div><strong>Params:</strong> ${meta.n_params?.toLocaleString() || '--'}</div>
             <div><strong>Epoch:</strong> ${meta.epoch != null ? meta.epoch + 1 : '--'}</div>
@@ -190,7 +205,6 @@ function renderModelDetail(detailBody, meta) {
             <div><strong>Val Loss:</strong> ${meta.val_loss != null ? meta.val_loss.toFixed(4) : '--'}</div>
             <div><strong>Train Loss:</strong> ${meta.train_loss != null ? meta.train_loss.toFixed(4) : '--'}</div>
             <div><strong>Classes:</strong> ${meta.num_classes || '--'}</div>
-            <div><strong>Device:</strong> ${meta.device || '--'}</div>
         </div>
     `;
 }

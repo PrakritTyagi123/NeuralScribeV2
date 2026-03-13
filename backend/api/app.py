@@ -138,6 +138,10 @@ def create_app() -> FastAPI:
         async def serve_lnn_css():
             return FileResponse(str(frontend_dir / "lnn.css"), media_type="text/css")
 
+        @app.get("/dropdown.css")
+        async def serve_dropdown_css():
+            return FileResponse(str(frontend_dir / "dropdown.css"), media_type="text/css")
+
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
             from fastapi.responses import JSONResponse

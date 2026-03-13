@@ -1,5 +1,6 @@
 /* NeuralScribe v2 — Black & White Wireframe */
 @import url('/lnn.css');
+@import url('/dropdown.css');
 
 :root {
     --bg: #ffffff;

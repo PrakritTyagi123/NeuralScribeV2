@@ -2,11 +2,46 @@ dataset:
   emnist_split: balanced
   emnist_root: data/raw/emnist
   auto_download: true
-  # Only use EMNIST classes 0-9 (digits) and 10-35 (uppercase A-Z)
-  # All lowercase and merged classes are filtered out
-  filter_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
+  filter_classes:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
 synthetic:
-  enabled: false
+  enabled: true
+  samples_per_symbol: 1500
 preprocessing:
   image_size: 28
   interpolation: bicubic

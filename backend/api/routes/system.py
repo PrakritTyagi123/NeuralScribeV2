@@ -49,7 +49,7 @@ async def class_registry(request: Request):
 @router.get("/languages")
 async def list_languages(request: Request):
     """Return all available languages with their status."""
-    from ..utils.config import ProjectConfig
+    from ...utils.config import ProjectConfig
     pc = ProjectConfig()
     return {
         "languages": pc.get_available_languages(),
@@ -72,7 +72,7 @@ async def set_language(request: Request, body: Dict[str, str] = Body(...)):
     results["interface"] = s.interface_service.set_language(language)
 
     # Update project config
-    from ..utils.config import ProjectConfig
+    from ...utils.config import ProjectConfig
     pc = ProjectConfig()
     pc.selected_language = language
 
@@ -94,14 +94,14 @@ async def set_language(request: Request, body: Dict[str, str] = Body(...)):
 @router.get("/project-config")
 async def get_project_config(request: Request):
     """Return the full project config."""
-    from ..utils.config import ProjectConfig
+    from ...utils.config import ProjectConfig
     return ProjectConfig().to_dict()
 
 
 @router.post("/project-config")
 async def update_project_config(request: Request, body: Dict[str, Any] = Body(...)):
     """Update project config fields."""
-    from ..utils.config import ProjectConfig
+    from ...utils.config import ProjectConfig
     pc = ProjectConfig()
     for key, value in body.items():
         if key == "ui_state" and isinstance(value, dict):
@@ -121,7 +121,7 @@ async def shutdown(request: Request):
     if os.getenv("APP_ENV", "dev").lower() == "prod":
         return {"error": "Shutdown is disabled in production."}
     # Save project config before shutdown
-    from ..utils.config import ProjectConfig
+    from ...utils.config import ProjectConfig
     ProjectConfig().save()
     ts = _services(request).training_service
     if ts.is_training:
@@ -139,7 +139,7 @@ async def shutdown(request: Request):
 async def clear_all(request: Request):
     """Delete all cached data and models for the current language."""
     import shutil
-    from ..utils.config import PROJECT_ROOT
+    from ...utils.config import PROJECT_ROOT
 
     s = _services(request)
 
@@ -156,7 +156,7 @@ async def clear_all(request: Request):
     deleted = []
 
     # Clear dataset cache for current language
-    from ..utils.config import get_language_paths
+    from ...utils.config import get_language_paths
     paths = get_language_paths(language)
     cache_dir = paths.dataset_dir / "cache"
     if cache_dir.exists():
@@ -178,7 +178,7 @@ async def clear_all(request: Request):
         deleted.append(f"{language} models")
 
     # Update project config
-    from ..utils.config import ProjectConfig
+    from ...utils.config import ProjectConfig
     pc = ProjectConfig()
     pc.set_language_config(language, "dataset_prepared", False)
     pc.set_language_config(language, "last_model", None)
