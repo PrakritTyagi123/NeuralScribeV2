@@ -1,14 +1,9 @@
-# NeuralScribe v2 — English Class Registry
-# Characters: 0-9 digits + A-Z uppercase letters
-# Total: 36 classes
-# Source: EMNIST Balanced (digits + uppercase subset)
-
 version: 2
 language: english
-total_classes: 36
-
+total_classes: 47
+status: ready
 classes:
-  # ── Digits (0–9) ──
+  # Digits 0-9
   - { id: 0,  label: "0", display: "0", category: digit }
   - { id: 1,  label: "1", display: "1", category: digit }
   - { id: 2,  label: "2", display: "2", category: digit }
@@ -19,8 +14,7 @@ classes:
   - { id: 7,  label: "7", display: "7", category: digit }
   - { id: 8,  label: "8", display: "8", category: digit }
   - { id: 9,  label: "9", display: "9", category: digit }
-
-  # ── Uppercase Latin (A–Z) ──
+  # Uppercase A-Z
   - { id: 10, label: "A", display: "A", category: uppercase }
   - { id: 11, label: "B", display: "B", category: uppercase }
   - { id: 12, label: "C", display: "C", category: uppercase }
@@ -47,14 +41,16 @@ classes:
   - { id: 33, label: "X", display: "X", category: uppercase }
   - { id: 34, label: "Y", display: "Y", category: uppercase }
   - { id: 35, label: "Z", display: "Z", category: uppercase }
-
-emnist_split: "balanced"
-
-# EMNIST balanced class mapping for English:
-# EMNIST idx 0-9  → digits 0-9 (our id 0-9)
-# EMNIST idx 10-35 → uppercase A-Z (our id 10-35)
-# All other EMNIST classes (lowercase, merged) are IGNORED
-
-category_order:
-  - digit
-  - uppercase
+  # Lowercase (EMNIST balanced subset — 11 chars not merged with uppercase)
+  - { id: 36, label: "a", display: "a", category: lowercase }
+  - { id: 37, label: "b", display: "b", category: lowercase }
+  - { id: 38, label: "d", display: "d", category: lowercase }
+  - { id: 39, label: "e", display: "e", category: lowercase }
+  - { id: 40, label: "f", display: "f", category: lowercase }
+  - { id: 41, label: "g", display: "g", category: lowercase }
+  - { id: 42, label: "h", display: "h", category: lowercase }
+  - { id: 43, label: "n", display: "n", category: lowercase }
+  - { id: 44, label: "q", display: "q", category: lowercase }
+  - { id: 45, label: "r", display: "r", category: lowercase }
+  - { id: 46, label: "t", display: "t", category: lowercase }
+category_order: [digit, uppercase, lowercase]

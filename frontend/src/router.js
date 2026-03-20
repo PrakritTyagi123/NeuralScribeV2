@@ -1,9 +1,9 @@
 /**
- * NeuralScribe v2 — Simple SPA router.
- * Maps view names to render functions. Handles sidebar navigation.
+ * NeuralScribe v2 — SPA Router
+ * Pages: Intro → Download → Data Prep → Training → Models → Live View → Settings
  */
-
-import { renderDashboard } from '../views/dashboard.js';
+import { renderIntro } from '../views/intro.js';
+import { renderDownload } from '../views/download.js';
 import { renderDataPrep } from '../views/dataPrep.js';
 import { renderTraining } from '../views/training.js';
 import { renderModelManager } from '../views/modelManager.js';
@@ -11,7 +11,8 @@ import { renderExplainability } from '../views/explainability.js';
 import { renderSetting } from '../views/setting.js';
 
 const views = {
-    dashboard: renderDashboard,
+    intro: renderIntro,
+    download: renderDownload,
     dataPrep: renderDataPrep,
     training: renderTraining,
     modelManager: renderModelManager,
@@ -19,10 +20,9 @@ const views = {
     setting: renderSetting,
 };
 
-let currentView = 'dashboard';
+let currentView = 'intro';
 
-export function initRouter() {
-    // Sidebar click handlers
+export async function initRouter() {
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -30,28 +30,19 @@ export function initRouter() {
             if (view) navigateTo(view);
         });
     });
-
-    // Render initial view
-    navigateTo('dashboard');
+    navigateTo('intro');
 }
 
 export function navigateTo(viewName) {
     if (!views[viewName]) return;
-
     currentView = viewName;
-
-    // Update sidebar active state
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.view === viewName);
     });
-
-    // Render view
     const main = document.getElementById('main');
     main.innerHTML = '';
-    main.className = '';  // Reset any view-specific classes
+    main.className = '';
     views[viewName](main);
 }
 
-export function getCurrentView() {
-    return currentView;
-}
+export function getCurrentView() { return currentView; }

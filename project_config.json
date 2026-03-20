@@ -3,41 +3,7 @@
     "last_selected_language": "english",
     "last_selected_model": null,
     "languages": {
-        "english": {
-            "enabled": true,
-            "status": "ready",
-            "dataset_prepared": true,
-            "last_model": "best_model"
-        },
-        "devanagari": {
-            "enabled": false,
-            "status": "placeholder",
-            "dataset_prepared": false,
-            "last_model": null
-        },
-        "arabic": {
-            "enabled": false,
-            "status": "placeholder",
-            "dataset_prepared": false,
-            "last_model": null
-        },
-        "cyrillic": {
-            "enabled": false,
-            "status": "placeholder",
-            "dataset_prepared": false,
-            "last_model": null
-        },
-        "chinese": {
-            "enabled": false,
-            "status": "placeholder",
-            "dataset_prepared": false,
-            "last_model": null
-        }
+        "english": { "enabled": true, "status": "ready", "dataset_prepared": false, "last_model": null }
     },
-    "ui_state": {
-        "active_view": "dashboard",
-        "prep_language": "english",
-        "training_language": "english",
-        "inference_language": "english"
-    }
+    "ui_state": { "active_view": "intro" }
 }

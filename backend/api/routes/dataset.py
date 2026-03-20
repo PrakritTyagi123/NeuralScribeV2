@@ -1,98 +1,65 @@
-"""
-Dataset API routes — language-aware data preparation, status, config.
-"""
+"""Dataset API routes — download EMNIST + prepare for training."""
 
-from fastapi import APIRouter, Request, Query, Body
+from fastapi import APIRouter, Request, Body
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+import asyncio
 
 from ..ws import broadcast_event
 
 router = APIRouter()
 
-
-def _services(request: Request):
-    return request.app.state.services
-
+def _svc(r): return r.app.state.services
 
 class PrepareRequest(BaseModel):
-    language: Optional[str] = None
     overrides: Optional[Dict[str, Any]] = None
 
-
 @router.get("/status")
-async def dataset_status(request: Request, language: Optional[str] = Query(None)):
-    svc = _services(request).dataset_service
-    if language:
-        svc.set_language(language)
-    return svc.get_status()
-
+async def status(r: Request):
+    return _svc(r).dataset_service.get_status()
 
 @router.get("/config")
-async def dataset_config(request: Request, language: Optional[str] = Query(None)):
-    svc = _services(request).dataset_service
-    if language:
-        svc.set_language(language)
-    return svc.get_config()
+async def config(r: Request):
+    return _svc(r).dataset_service.get_config()
 
+@router.get("/download-status")
+async def download_status(r: Request):
+    from ...ml.dataset_downloader import get_download_status
+    return get_download_status()
 
-@router.post("/config")
-async def update_dataset_config(request: Request, body: Dict[str, Any] = Body(...)):
-    svc = _services(request).dataset_service
-    language = body.pop("language", None)
-    if language:
-        svc.set_language(language)
-    svc.update_config(body)
-    return {"status": "updated", "language": svc.language, "applied": body}
-
+@router.post("/download")
+async def trigger_download(r: Request):
+    from ...ml.dataset_downloader import download_emnist
+    async def ws(d):
+        d["type"] = "download_progress"
+        await broadcast_event(d)
+    async def run():
+        loop = asyncio.get_event_loop()
+        def sync_emit(d): asyncio.run_coroutine_threadsafe(ws(d), loop)
+        result = await loop.run_in_executor(None, download_emnist, sync_emit)
+        await broadcast_event({"type": "download_complete", **result})
+    asyncio.create_task(run())
+    return {"status": "started"}
 
 @router.post("/prepare")
-async def prepare_dataset(request: Request, body: PrepareRequest = PrepareRequest()):
-    svc = _services(request).dataset_service
-
-    if body.language:
-        result = svc.set_language(body.language)
-        if "error" in result:
-            return result
-
-    if svc.is_preparing:
-        return {"error": "Dataset preparation already in progress"}
-
-    if body.overrides:
-        svc.update_config(body.overrides)
-
-    async def ws_progress(data: Dict[str, Any]):
-        data["type"] = "dataset_progress"
-        await broadcast_event(data)
-
-    import asyncio
-
-    async def run_prep():
-        result = await svc.prepare_dataset(ws_callback=ws_progress)
+async def prepare(r: Request, body: PrepareRequest = PrepareRequest()):
+    svc = _svc(r).dataset_service
+    if svc.is_preparing: return {"error": "Already in progress"}
+    if body.overrides: svc.update_config(body.overrides)
+    async def ws(d): d["type"] = "dataset_progress"; await broadcast_event(d)
+    async def run():
+        result = await svc.prepare_dataset(ws_callback=ws)
         await broadcast_event({"type": "dataset_complete", **result})
-
-    asyncio.create_task(run_prep())
-
-    return {"status": "started", "language": svc.language, "message": f"Dataset preparation started for {svc.language}"}
-
+    asyncio.create_task(run())
+    return {"status": "started"}
 
 @router.post("/cancel")
-async def cancel_preparation(request: Request):
-    svc = _services(request).dataset_service
-    if not svc.is_preparing:
-        return {"error": "No preparation in progress"}
+async def cancel(r: Request):
+    svc = _svc(r).dataset_service
+    if not svc.is_preparing: return {"error": "Not in progress"}
     svc.cancel()
     return {"status": "cancelling"}
 
-
 @router.get("/progress")
-async def preparation_progress(request: Request):
-    return _services(request).dataset_service.progress
-
-
-@router.post("/set-language")
-async def set_dataset_language(request: Request, body: Dict[str, str] = Body(...)):
-    language = body.get("language")
-    if not language:
-        return {"error": "language is required"}
-    return _services(request).dataset_service.set_language(language)
+async def progress(r: Request):
+    return _svc(r).dataset_service.progress

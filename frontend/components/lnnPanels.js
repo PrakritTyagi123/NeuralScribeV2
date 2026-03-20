@@ -38,7 +38,7 @@ export function drawGradCAM(pixels) {
 
     for (let y = 0; y < 56; y++) {
         for (let x = 0; x < 56; x++) {
-            const srcX = Math.floor(x * size / 56);
+            const srcX = Math.floor((55 - x) * size / 56);  // flip horizontal
             const srcY = Math.floor(y * size / 56);
             const val = pixels[srcY * size + srcX] || 0;
 

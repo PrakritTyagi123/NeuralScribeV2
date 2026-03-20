@@ -105,7 +105,7 @@ async def start_training(request: Request, body: TrainRequest = TrainRequest()):
         if "error" not in load_result:
             model = s.model_service.get_loaded_model()
             if model:
-                s.interface_service.set_model(model, ts._registry)
+                s.interface_service.set_model(model)
         await broadcast_event({"type": "training_complete", **result})
 
     asyncio.create_task(run_training())

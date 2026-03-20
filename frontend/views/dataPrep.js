@@ -1,17 +1,19 @@
-/** Data Preparation view — language-aware, fits viewport. */
+/**
+ * NeuralScribe v2 — Data Preparation
+ * Reads EMNIST directly, preprocesses, augments, caches.
+ * User configures: augmentation factor.
+ */
 import { createProgressBar, updateProgressBar } from '../components/progressBar.js';
 import { createLogConsole, appendLog } from '../components/logConsole.js';
-import { createLanguageDropdown } from '../components/languageDropdown.js';
 import { onWsEvent } from '../src/ws.js';
 import { showToast } from '../components/toast.js';
 
-let unsubscribers = [];
-let sysPollTimer = null;
+let unsubs = [];
+let sysPoll = null;
 
 export async function renderDataPrep(container) {
-    unsubscribers.forEach(u => u());
-    unsubscribers = [];
-    if (sysPollTimer) clearInterval(sysPollTimer);
+    unsubs.forEach(u => u()); unsubs = [];
+    if (sysPoll) clearInterval(sysPoll);
 
     container.innerHTML = '';
     container.className = 'view-fit';
@@ -21,29 +23,16 @@ export async function renderDataPrep(container) {
     title.textContent = 'Data Preparation';
     container.appendChild(title);
 
-    // ── Language toolbar ──
-    const toolbar = document.createElement('div');
-    toolbar.className = 'lang-toolbar';
-    container.appendChild(toolbar);
+    const desc = document.createElement('div');
+    desc.className = 'text-sm text-muted';
+    desc.style.marginBottom = '8px';
+    desc.textContent = 'Step 2: Preprocess and augment EMNIST for training. Reads directly from the downloaded data.';
+    container.appendChild(desc);
 
-    let logConsole; // declare early for use in dropdown callback
-
-    const langDropdown = await createLanguageDropdown(async (language) => {
-        // Switch backend language
-        await fetch('/api/dataset/set-language', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ language }),
-        });
-        // Reload status
-        await reloadStatus();
-    }, 'prep_language');
-    toolbar.appendChild(langDropdown.element);
-
-    // ── Top row: config + progress ──
+    // Top row
     const topRow = document.createElement('div');
     topRow.className = 'grid-2';
-    topRow.style.cssText = 'flex-shrink:0;';
+    topRow.style.flexShrink = '0';
     container.appendChild(topRow);
 
     // Config panel
@@ -53,19 +42,18 @@ export async function renderDataPrep(container) {
     configPanel.innerHTML = `
         <div class="panel-header">Configuration</div>
         <div class="panel-body" style="padding:8px;">
-            <div class="form-group" style="margin-bottom:4px;">
-                <label>Dataset Source</label>
-                <input type="text" id="prep-source" value="EMNIST Balanced" disabled style="padding:2px 4px;">
-                <div class="text-sm text-muted">Source dataset for current language. Auto-downloads on first run.</div>
+            <div class="form-group" style="margin-bottom:6px;">
+                <label>Dataset</label>
+                <span class="text-sm" id="prep-info">Checking...</span>
             </div>
-            <div class="form-group" style="margin-bottom:4px;">
+            <div class="form-group" style="margin-bottom:6px;">
                 <label>Augmentation Factor</label>
-                <input type="number" id="prep-augfactor" value="3" style="padding:2px 4px;">
-                <div class="text-sm text-muted">Multiplier for augmentations (rotation, shear, elastic).</div>
+                <input type="number" id="prep-aug" value="3" min="0" max="10" style="padding:2px 4px;width:60px;">
+                <span class="text-sm text-muted">× multiplier (0 = none, 3 = recommended)</span>
             </div>
-            <div class="form-group" style="margin-bottom:4px;">
-                <label>Classes</label>
-                <span id="prep-classes" class="text-sm text-muted">--</span>
+            <div class="form-group" style="margin-bottom:6px;">
+                <label>Expected Samples</label>
+                <span class="text-sm" id="prep-estimate">--</span>
             </div>
             <div class="btn-group mt-8">
                 <button class="btn btn-primary" id="prep-start">Start Preparation</button>
@@ -79,19 +67,18 @@ export async function renderDataPrep(container) {
     const progressPanel = document.createElement('div');
     progressPanel.className = 'panel';
     progressPanel.style.marginBottom = '8px';
-    progressPanel.innerHTML = `<div class="panel-header">Progress</div>`;
+    progressPanel.innerHTML = '<div class="panel-header">Progress</div>';
     const progressBody = document.createElement('div');
     progressBody.className = 'panel-body';
     progressBody.style.padding = '8px';
 
     const stages = [
-        { id: 'emnist', label: '1. Loading Dataset' },
+        { id: 'loading', label: '1. Loading EMNIST' },
         { id: 'preprocessing', label: '2. Preprocessing' },
-        { id: 'augmentation', label: '3. Augmentation' },
-        { id: 'splitting', label: '4. Split & Cache' },
+        { id: 'augmenting', label: '3. Augmentation' },
+        { id: 'caching', label: '4. Split & Cache' },
     ];
-
-    const stageBars = {};
+    const bars = {};
     stages.forEach(s => {
         const row = document.createElement('div');
         row.style.marginBottom = '4px';
@@ -99,92 +86,89 @@ export async function renderDataPrep(container) {
         const bar = createProgressBar(0, 'Waiting');
         row.appendChild(bar);
         progressBody.appendChild(row);
-        stageBars[s.id] = bar;
+        bars[s.id] = bar;
     });
 
     const sysInfo = document.createElement('div');
     sysInfo.className = 'text-sm mt-8';
-    sysInfo.id = 'prep-sys';
     progressBody.appendChild(sysInfo);
     progressPanel.appendChild(progressBody);
     topRow.appendChild(progressPanel);
 
-    // ── Log panel ──
+    // Log panel
     const logPanel = document.createElement('div');
     logPanel.className = 'panel';
     logPanel.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;';
-    logPanel.innerHTML = `<div class="panel-header" style="flex-shrink:0;">Log</div>`;
-    logConsole = createLogConsole();
+    logPanel.innerHTML = '<div class="panel-header" style="flex-shrink:0;">Log</div>';
+    const logConsole = createLogConsole();
     logConsole.style.cssText = 'flex:1;height:auto;min-height:0;border:none;overflow-y:auto;';
     logPanel.appendChild(logConsole);
     container.appendChild(logPanel);
 
-    // ── Load status for current language ──
-    async function reloadStatus() {
-        try {
-            const lang = langDropdown.getValue();
-            const res = await fetch(`/api/dataset/status?language=${lang}`);
-            const status = await res.json();
-            const classesEl = container.querySelector('#prep-classes');
-            if (classesEl) classesEl.textContent = `${status.num_classes} classes (${lang})`;
-            if (status.cache_exists) {
-                appendLog(logConsole, `[${lang}] Cache exists: ${status.cache_size} (${status.num_classes} classes)`);
-            } else {
-                appendLog(logConsole, `[${lang}] No cache found. Click Start to prepare dataset.`);
-            }
-            if (status.registry_status === 'placeholder') {
-                appendLog(logConsole, `[${lang}] ⚠ This language is a placeholder — dataset not available yet.`);
-                container.querySelector('#prep-start').disabled = true;
-            } else {
-                container.querySelector('#prep-start').disabled = false;
-            }
-        } catch (e) { appendLog(logConsole, 'Cannot reach backend.'); }
-    }
-    await reloadStatus();
-
-    // ── System polling ──
-    async function pollSys() {
-        try {
-            const [gpuRes, sysRes] = await Promise.all([fetch('/api/system/gpu'), fetch('/api/system/stats')]);
-            const gpu = await gpuRes.json();
-            const sys = await sysRes.json();
-            sysInfo.innerHTML = `<strong>CPU:</strong> ${sys.cpu_percent}% | <strong>RAM:</strong> ${sys.ram_used_gb}/${sys.ram_total_gb}GB${gpu.available ? ` | <strong>GPU:</strong> ${gpu.gpu_util_percent}% VRAM:${gpu.memory_used_mb}MB` : ''}`;
-        } catch (e) {}
-    }
-    pollSys();
-    sysPollTimer = setInterval(pollSys, 5000);
-
-    // ── Buttons ──
     const startBtn = container.querySelector('#prep-start');
     const cancelBtn = container.querySelector('#prep-cancel');
+    const augInput = container.querySelector('#prep-aug');
+    const infoEl = container.querySelector('#prep-info');
+    const estimateEl = container.querySelector('#prep-estimate');
 
+    // Estimate updater
+    const BASE_SAMPLES = 131600;
+    function updateEstimate() {
+        const aug = parseInt(augInput.value) || 0;
+        const total = BASE_SAMPLES * (1 + aug);
+        estimateEl.textContent = `~${total.toLocaleString()} total (${BASE_SAMPLES.toLocaleString()} base × ${1 + aug})`;
+    }
+    augInput.addEventListener('input', updateEstimate);
+    updateEstimate();
+
+    // Load status
+    try {
+        const st = await (await fetch('/api/dataset/status')).json();
+        if (st.cache_exists) {
+            infoEl.textContent = `English — 47 classes — Cache: ${st.cache_size}`;
+            appendLog(logConsole, `Cache exists: ${st.cache_size} (${st.num_classes} classes). Re-run to rebuild.`);
+        } else if (st.emnist_downloaded) {
+            infoEl.textContent = 'English — 47 classes — EMNIST downloaded, ready to prepare';
+            appendLog(logConsole, 'EMNIST downloaded. Click Start to preprocess and cache.');
+        } else {
+            infoEl.textContent = 'English — 47 classes — EMNIST NOT downloaded';
+            appendLog(logConsole, '⚠ EMNIST not downloaded. Go to Download page first.');
+            startBtn.disabled = true;
+        }
+    } catch (e) { appendLog(logConsole, 'Cannot reach backend.'); }
+
+    // System polling
+    async function pollSys() {
+        try {
+            const [g, s] = await Promise.all([fetch('/api/system/gpu'), fetch('/api/system/stats')]);
+            const gpu = await g.json(), sys = await s.json();
+            sysInfo.innerHTML = `<strong>CPU:</strong> ${sys.cpu_percent}% | <strong>RAM:</strong> ${sys.ram_used_gb}/${sys.ram_total_gb}GB` +
+                (gpu.available ? ` | <strong>GPU:</strong> ${gpu.gpu_util_percent}%` : '');
+        } catch {}
+    }
+    pollSys(); sysPoll = setInterval(pollSys, 5000);
+
+    // Start
     startBtn.addEventListener('click', async () => {
-        startBtn.disabled = true;
-        cancelBtn.disabled = false;
-        Object.values(stageBars).forEach(bar => updateProgressBar(bar, 0, 'Waiting'));
+        startBtn.disabled = true; cancelBtn.disabled = false;
+        Object.values(bars).forEach(b => updateProgressBar(b, 0, 'Waiting'));
 
-        const augVal = parseInt(container.querySelector('#prep-augfactor').value) || 3;
-        const lang = langDropdown.getValue();
+        const aug = parseInt(augInput.value) || 0;
+        appendLog(logConsole, `Starting: augmentation ×${aug}`);
 
-        appendLog(logConsole, `[${lang}] Starting preparation, augment factor=${augVal}`);
         try {
             const res = await fetch('/api/dataset/prepare', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ language: lang, overrides: { 'augmentation.precompute_factor': augVal } }),
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ overrides: { 'augmentation.precompute_factor': aug } }),
             });
-            const data = await res.json();
-            if (data.error) {
-                appendLog(logConsole, `Error: ${data.error}`);
-                startBtn.disabled = false;
-                cancelBtn.disabled = true;
-            } else {
-                appendLog(logConsole, data.message || JSON.stringify(data));
+            const d = await res.json();
+            if (d.error) {
+                appendLog(logConsole, `Error: ${d.error}`);
+                startBtn.disabled = false; cancelBtn.disabled = true;
             }
         } catch (e) {
             appendLog(logConsole, `Error: ${e.message}`);
-            startBtn.disabled = false;
-            cancelBtn.disabled = true;
+            startBtn.disabled = false; cancelBtn.disabled = true;
         }
     });
 
@@ -193,41 +177,40 @@ export async function renderDataPrep(container) {
         appendLog(logConsole, 'Cancellation requested.');
     });
 
-    // ── WS events ──
+    // WS progress
     const stageMap = {
-        'loading_emnist': 'emnist',
-        'generating_synthetic': 'emnist',
-        'merging': 'preprocessing',
+        'loading_emnist': 'loading',
         'preprocessing': 'preprocessing',
-        'augmenting': 'augmentation',
-        'splitting': 'splitting',
-        'caching': 'splitting',
-        'complete': 'splitting',
+        'augmenting': 'augmenting',
+        'splitting': 'caching',
+        'caching': 'caching',
+        'complete': 'caching',
     };
 
-    unsubscribers.push(onWsEvent('dataset_progress', (data) => {
-        const stageKey = stageMap[data.stage] || null;
-        const pct = data.total > 0 ? Math.min(100, data.processed / data.total * 100) : 0;
+    unsubs.push(onWsEvent('dataset_progress', (d) => {
+        const key = stageMap[d.stage];
+        if (key && bars[key]) {
+            const pct = d.total > 0 ? Math.min(100, d.processed / d.total * 100) : 0;
+            let text = d.message || `${Math.round(pct)}%`;
+            updateProgressBar(bars[key], pct, text);
 
-        if (stageKey && stageBars[stageKey]) {
-            let text = `${Math.round(pct)}%`;
-            if (data.samples_per_sec) text += ` | ${data.samples_per_sec.toLocaleString()}/s`;
-            if (data.eta_seconds) text += ` | ETA ${Math.round(data.eta_seconds)}s`;
-            updateProgressBar(stageBars[stageKey], pct, text);
-
-            const order = ['emnist', 'preprocessing', 'augmentation', 'splitting'];
-            const idx = order.indexOf(stageKey);
-            for (let i = 0; i < idx; i++) updateProgressBar(stageBars[order[i]], 100, 'Complete');
+            // Mark earlier stages complete
+            const order = ['loading', 'preprocessing', 'augmenting', 'caching'];
+            const idx = order.indexOf(key);
+            for (let i = 0; i < idx; i++) updateProgressBar(bars[order[i]], 100, 'Complete');
         }
-        if (data.message) appendLog(logConsole, data.message);
+        if (d.message) appendLog(logConsole, d.message);
     }));
 
-    unsubscribers.push(onWsEvent('dataset_complete', (data) => {
-        Object.values(stageBars).forEach(bar => updateProgressBar(bar, 100, 'Complete'));
-        startBtn.disabled = false;
-        cancelBtn.disabled = true;
-        appendLog(logConsole, `Complete! ${data.total_samples?.toLocaleString()} samples, ${data.cache_size}`);
-        showToast(`Dataset ready for ${data.language || 'current language'}!`);
-        langDropdown.refresh();
+    unsubs.push(onWsEvent('dataset_complete', (d) => {
+        Object.values(bars).forEach(b => updateProgressBar(b, 100, 'Complete'));
+        startBtn.disabled = false; cancelBtn.disabled = true;
+        if (d.error) {
+            appendLog(logConsole, `Error: ${d.error}`);
+        } else {
+            appendLog(logConsole, `Complete! ${d.total_samples?.toLocaleString()} samples, cache: ${d.cache_size}, time: ${d.elapsed_seconds}s`);
+            infoEl.textContent = `English — 47 classes — Cache: ${d.cache_size}`;
+            showToast('Dataset prepared! Go to Training.');
+        }
     }));
 }

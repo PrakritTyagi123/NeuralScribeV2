@@ -78,7 +78,8 @@ export function createCanvas(size = 280) {
     canvas.addEventListener('touchend', stopDraw);
 
     const controls = document.createElement('div');
-    controls.className = 'flex gap-8 mt-8';
+    controls.className = 'canvas-controls flex gap-8';
+    controls.style.cssText = 'margin-top:6px;padding:4px 0;';
     controls.innerHTML = `
         <button class="btn" id="canvas-clear">Clear</button>
         <label class="text-sm" style="display:flex;align-items:center;gap:4px;">

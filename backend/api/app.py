@@ -1,36 +1,25 @@
-"""
-NeuralScribe v2 — FastAPI application (language-aware).
-Creates the app, initializes services, restores project state,
-registers all routes, and serves the frontend.
-"""
+"""NeuralScribe v2 — FastAPI application (English only)."""
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from pathlib import Path
 from contextlib import asynccontextmanager
 
-from ..utils.config import (
-    PROJECT_ROOT, ProjectConfig, ensure_all_language_dirs,
-)
+from ..utils.config import PROJECT_ROOT, ProjectConfig, ensure_all_language_dirs
 from ..utils.logging import get_logger, setup_logging
 from ..services.dataset_service import DatasetService
 from ..services.training_service import TrainingService
 from ..services.model_service import ModelService
 from ..services.system_service import SystemService
 from ..services.interface_service import InterfaceService
-
 from .routes import dataset, training, models, inference, explainability, system
 from .ws import ws_router
 
 log = get_logger(__name__)
 
-
 class AppState:
-    """Shared application state — service singletons."""
-
     def __init__(self):
         self.dataset_service = DatasetService()
         self.training_service = TrainingService()
@@ -38,118 +27,56 @@ class AppState:
         self.system_service = SystemService()
         self.interface_service = InterfaceService()
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown lifecycle."""
     setup_logging()
     log.info("NeuralScribe v2 starting up")
-
-    # Ensure directory structure exists
     ensure_all_language_dirs()
-
-    # Load project config
-    pc = ProjectConfig()
-    language = pc.selected_language
-    log.info(f"Restoring project state — language: {language}")
-
-    # Initialize shared state
     state = AppState()
     app.state.services = state
-
-    # Sync all services to the saved language
-    state.dataset_service.set_language(language)
-    state.training_service.set_language(language)
-    state.model_service.set_language(language)
-    state.interface_service.set_language(language)
-
-    # Try to load the last used model (or best_model) for inference
-    last_model = pc.selected_model or pc.get_language_config(language).get("last_model") or "best_model"
-    result = state.model_service.load_model(last_model)
+    # Try to load best model for inference
+    result = state.model_service.load_model("best_model")
     if "error" not in result:
         model = state.model_service.get_loaded_model()
         if model:
             state.interface_service.set_model(model)
-            log.info(f"Loaded model '{last_model}' for {language} inference")
+            log.info("Loaded best model for inference")
     else:
-        log.info(f"No model found for {language} — inference unavailable until a model is trained/loaded")
-
+        log.info("No model found — inference unavailable until trained")
     yield
-
-    # Save project config on shutdown
-    log.info("NeuralScribe v2 shutting down — saving project config")
-    pc.save()
-
+    ProjectConfig().save()
+    log.info("NeuralScribe v2 shutting down")
 
 def create_app() -> FastAPI:
-    """Factory function to create the FastAPI application."""
-    app = FastAPI(
-        title="NeuralScribe v2",
-        description="Multi-language handwriting recognition",
-        version="2.0.0",
-        lifespan=lifespan,
-    )
+    app = FastAPI(title="NeuralScribe v2", version="2.0.0", lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                       allow_methods=["*"], allow_headers=["*"])
 
-    # CORS
-    app_env = os.getenv("APP_ENV", "dev").lower()
-    if app_env == "prod":
-        frontend_origin = os.getenv("FRONTEND_ORIGIN", "")
-        allow_origins = [frontend_origin] if frontend_origin else []
-        allow_credentials = bool(frontend_origin)
-    else:
-        allow_origins = ["*"]
-        allow_credentials = True
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allow_origins,
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    # ── Register API routes ──
     app.include_router(system.router, prefix="/api/system", tags=["System"])
     app.include_router(dataset.router, prefix="/api/dataset", tags=["Dataset"])
     app.include_router(training.router, prefix="/api/training", tags=["Training"])
     app.include_router(models.router, prefix="/api/models", tags=["Models"])
     app.include_router(inference.router, prefix="/api/inference", tags=["Inference"])
     app.include_router(explainability.router, prefix="/api/explain", tags=["Explainability"])
-
-    # ── WebSocket ──
     app.include_router(ws_router)
 
-    # ── Serve frontend ──
-    frontend_dir = PROJECT_ROOT / "frontend"
-    if frontend_dir.exists():
-        assets_dir = frontend_dir / "assets"
-        if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-
-        app.mount("/components", StaticFiles(directory=str(frontend_dir / "components")), name="components")
-        app.mount("/src", StaticFiles(directory=str(frontend_dir / "src")), name="src")
-        app.mount("/views", StaticFiles(directory=str(frontend_dir / "views")), name="views")
+    fd = PROJECT_ROOT / "frontend"
+    if fd.exists():
+        for name in ["components", "src", "views"]:
+            d = fd / name
+            if d.exists(): app.mount(f"/{name}", StaticFiles(directory=str(d)), name=name)
 
         @app.get("/style.css")
-        async def serve_css():
-            return FileResponse(str(frontend_dir / "style.css"), media_type="text/css")
-
+        async def css(): return FileResponse(str(fd / "style.css"), media_type="text/css")
         @app.get("/lnn.css")
-        async def serve_lnn_css():
-            return FileResponse(str(frontend_dir / "lnn.css"), media_type="text/css")
-
+        async def lnn(): return FileResponse(str(fd / "lnn.css"), media_type="text/css")
         @app.get("/dropdown.css")
-        async def serve_dropdown_css():
-            return FileResponse(str(frontend_dir / "dropdown.css"), media_type="text/css")
-
+        async def dropdown(): return FileResponse(str(fd / "dropdown.css"), media_type="text/css")
         @app.get("/{full_path:path}")
-        async def serve_spa(full_path: str):
+        async def spa(full_path: str):
             from fastapi.responses import JSONResponse
             if full_path.startswith("api/") or full_path.startswith("ws"):
                 return JSONResponse({"error": "Not found"}, status_code=404)
-            index = frontend_dir / "index.html"
-            if index.exists():
-                return FileResponse(str(index), media_type="text/html")
-            return JSONResponse({"error": "Frontend not found"}, status_code=404)
+            return FileResponse(str(fd / "index.html"), media_type="text/html")
 
     return app
