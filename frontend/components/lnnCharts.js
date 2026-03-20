@@ -1,11 +1,12 @@
 /**
  * NeuralScribe v2 — LNN Chart Renderers
- * Probability evolution, stroke timeline, and embedding space visualizations.
+ * Probability evolution, stroke timeline, and embedding visualization.
  */
 
 // ═══════════════════════════════════════
-// PROBABILITY EVOLUTION
+// PROBABILITY EVOLUTION (real data — unchanged)
 // ═══════════════════════════════════════
+
 export function drawEvo(ctx, wrap, evoHistory) {
     const w = wrap.clientWidth;
     const h = wrap.clientHeight;
@@ -69,8 +70,9 @@ export function drawEvo(ctx, wrap, evoHistory) {
 }
 
 // ═══════════════════════════════════════
-// STROKE TIMELINE
+// STROKE TIMELINE (real data — unchanged)
 // ═══════════════════════════════════════
+
 export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
     const w = wrap.clientWidth;
     const h = wrap.clientHeight;
@@ -146,8 +148,9 @@ export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
 }
 
 // ═══════════════════════════════════════
-// EMBEDDING SPACE
+// EMBEDDING SPACE (confidence-based layout, honestly labeled)
 // ═══════════════════════════════════════
+
 let embeddingCache = null;
 let embeddingPredKey = '';
 
@@ -155,16 +158,21 @@ function buildEmbeddingCache(preds, w, h) {
     const cx = w / 2, cy = h / 2;
     const cache = [];
     preds.slice(0, 5).forEach((pred, i) => {
+        // Position by confidence: winner near center, others spread out proportionally
         const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
-        const dist = i === 0 ? 0 : (0.25 + 0.12 * i) * Math.min(w, h) / 2;
+        const maxDist = Math.min(w, h) * 0.38;
+        const dist = i === 0 ? 0 : maxDist * (1 - pred.confidence) + maxDist * 0.2;
         const px = cx + Math.cos(angle) * dist;
         const py = cy + Math.sin(angle) * dist;
+
+        // Cluster density proportional to confidence
         const dots = [];
-        const count = Math.round(pred.confidence * 20 + 3);
+        const count = Math.max(3, Math.round(pred.confidence * 25));
+        const spread = 8 + (1 - pred.confidence) * 12;
         for (let d = 0; d < count; d++) {
             dots.push({
-                x: px + (Math.random() - 0.5) * 18,
-                y: py + (Math.random() - 0.5) * 18,
+                x: px + (Math.random() - 0.5) * spread,
+                y: py + (Math.random() - 0.5) * spread,
             });
         }
         cache.push({ pred, px, py, dots, isWinner: i === 0 });
@@ -186,25 +194,32 @@ export function drawEmbedding(ctx, wrap, outPreds) {
         return;
     }
 
-    // Rebuild cache only when predictions change
-    const key = outPreds.map(p => p.display).join(',');
+    // Rebuild cache when predictions change
+    const key = outPreds.map(p => p.display + p.confidence.toFixed(2)).join(',');
     if (key !== embeddingPredKey || !embeddingCache) {
         embeddingCache = buildEmbeddingCache(outPreds, w, h);
         embeddingPredKey = key;
     }
 
+    // Title
+    ctx.fillStyle = '#a1a1aa';
+    ctx.font = '7px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('Confidence clusters (simplified)', 4, 10);
+
     // Draw cached dots
     embeddingCache.forEach(cluster => {
         cluster.dots.forEach(dot => {
-            ctx.fillStyle = cluster.isWinner ? 'rgba(37,99,235,0.3)' : 'rgba(100,116,139,0.1)';
+            ctx.fillStyle = cluster.isWinner ? 'rgba(37,99,235,0.35)' : 'rgba(100,116,139,0.12)';
             ctx.beginPath();
-            ctx.arc(dot.x, dot.y, 2, 0, Math.PI * 2);
+            ctx.arc(dot.x, dot.y, 2.2, 0, Math.PI * 2);
             ctx.fill();
         });
         ctx.fillStyle = cluster.isWinner ? '#1e40af' : '#94a3b8';
         ctx.font = cluster.isWinner ? 'bold 10px monospace' : '9px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(cluster.pred.display, cluster.px, cluster.py - 10);
+        ctx.fillText(cluster.pred.display + ' ' + (cluster.pred.confidence * 100).toFixed(0) + '%',
+                      cluster.px, cluster.py - 12);
     });
 
     // Input marker at center
@@ -212,10 +227,8 @@ export function drawEmbedding(ctx, wrap, outPreds) {
     ctx.strokeStyle = '#2563eb';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(cx - 5, cy - 5);
-    ctx.lineTo(cx + 5, cy + 5);
-    ctx.moveTo(cx + 5, cy - 5);
-    ctx.lineTo(cx - 5, cy + 5);
+    ctx.moveTo(cx - 5, cy - 5); ctx.lineTo(cx + 5, cy + 5);
+    ctx.moveTo(cx + 5, cy - 5); ctx.lineTo(cx - 5, cy + 5);
     ctx.stroke();
     ctx.fillStyle = '#1e40af';
     ctx.font = 'bold 8px monospace';
@@ -223,7 +236,6 @@ export function drawEmbedding(ctx, wrap, outPreds) {
     ctx.fillText('INPUT', cx + 8, cy + 3);
 }
 
-/** Reset embedding cache (call when canvas is cleared). */
 export function resetEmbeddingCache() {
     embeddingCache = null;
     embeddingPredKey = '';

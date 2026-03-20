@@ -58,17 +58,17 @@ export async function renderExplainability(container) {
 
     // TOP RIGHT
     const colR = mk('div', 'lnn-col-r'); topRow.appendChild(colR);
-    const gcPanel = panel('Grad-CAM Saliency', 'Pixels most influencing the prediction', true);
+    const gcPanel = panel('Grad-CAM Saliency', 'Where the model looks');
     gcPanel.el.classList.add('lnn-gc-panel');
     gcPanel.body.innerHTML = '<div class="lnn-gc"><div class="lnn-gc-img"><canvas id="gc-cv" width="56" height="56"></canvas></div><div class="lnn-gc-side"><div class="lnn-gc-bar"></div><div class="lnn-gc-labels"><span>Low</span><span>High</span></div></div></div>';
     colR.appendChild(gcPanel.el);
 
-    const ppPanel = panel('Preprocessing', 'What the model actually sees', true);
+    const ppPanel = panel('Preprocessing', 'What the model actually sees');
     ppPanel.el.classList.add('lnn-pp-panel');
     ppPanel.body.innerHTML = '<div class="lnn-pp"><div class="lnn-pp-step"><img id="pp-raw" class="lnn-pp-img" /><div class="lnn-pp-lbl">Your input</div></div><div class="lnn-pp-arrow">→</div><div class="lnn-pp-step"><img id="pp-proc" class="lnn-pp-img" /><div class="lnn-pp-lbl">Model sees</div></div></div>';
     colR.appendChild(ppPanel.el);
 
-    const cnPanel = panel('Confusion', 'Classes the model is deciding between', true);
+    const cnPanel = panel('Confusion', 'Classes the model is deciding between');
     cnPanel.el.classList.add('lnn-cn-panel');
     cnPanel.body.id = 'cn-body'; cnPanel.body.innerHTML = '<div class="lnn-placeholder">Draw to see</div>';
     colR.appendChild(cnPanel.el);
@@ -80,7 +80,7 @@ export async function renderExplainability(container) {
     evoWrap.appendChild(evoCv); evoPanel.body.classList.add('lnn-cv-body');
     evoPanel.body.appendChild(evoWrap); colR.appendChild(evoPanel.el);
 
-    // BOTTOM LEFT
+    // BOTTOM LEFT: Feature Maps + Stroke Timeline
     const botL = mk('div', 'lnn-bot-l'); botRow.appendChild(botL);
     const fmPanel = panel('Feature Maps', 'Top activation channels');
     fmPanel.el.classList.add('lnn-fm-panel'); fmPanel.body.id = 'fmap-body';
@@ -88,37 +88,33 @@ export async function renderExplainability(container) {
     fmPanel.body.innerHTML = '<div class="lnn-placeholder">Draw to see activations</div>';
     botL.appendChild(fmPanel.el);
 
-    const stPanel = panel('Stroke Timeline', 'Confidence over time', true);
+    const stPanel = panel('Stroke Timeline', 'Confidence over time');
     stPanel.el.classList.add('lnn-st-panel');
     const stWrap = mk('div', 'lnn-cvwrap');
     const stCv = document.createElement('canvas'); stCv.classList.add('lnn-cv');
     stWrap.appendChild(stCv); stPanel.body.classList.add('lnn-cv-body');
     stPanel.body.appendChild(stWrap); botL.appendChild(stPanel.el);
 
-    // BOTTOM CENTER
-    const ldPanel = panel('Layer Inspector', 'Reserved');
-    ldPanel.el.classList.add('lnn-ld-panel');
-    ldPanel.body.innerHTML = '<div class="lnn-placeholder" style="display:flex;align-items:center;justify-content:center;flex:1;">Coming soon</div>';
-    botRow.appendChild(ldPanel.el);
+    // BOTTOM CENTER: Embedding Space (was in botR, now larger)
+    const emPanel = panel('Embedding Space', 'Confidence clusters — top-5 predictions');
+    emPanel.el.classList.add('lnn-em-panel');
+    emPanel.el.style.cssText = 'flex:2;min-height:0;';
+    const emWrap = mk('div', 'lnn-cvwrap');
+    const emCv = document.createElement('canvas'); emCv.classList.add('lnn-cv');
+    emWrap.appendChild(emCv); emPanel.body.classList.add('lnn-cv-body');
+    emPanel.body.appendChild(emWrap); botRow.appendChild(emPanel.el);
 
-    // BOTTOM RIGHT
+    // BOTTOM RIGHT: Robustness + Calibration
     const botR = mk('div', 'lnn-bot-r'); botRow.appendChild(botR);
-    const rbPanel = panel('Robustness', 'Stability across rotations and shifts', true);
+    const rbPanel = panel('Robustness', 'Stability across perturbations');
     rbPanel.el.classList.add('lnn-rb-panel');
     rbPanel.body.innerHTML = '<div class="lnn-rb"><div class="lnn-rb-track"><div class="lnn-rb-fill" id="rb-fill"></div></div><span class="lnn-rb-val" id="rb-val">—</span></div><div class="lnn-tta" id="tta-grid"></div>';
     botR.appendChild(rbPanel.el);
 
-    const calPanel = panel('Calibration', 'Is the confidence trustworthy?', true);
+    const calPanel = panel('Calibration', 'Confidence analysis');
     calPanel.el.classList.add('lnn-cal-panel');
     calPanel.body.innerHTML = '<div class="lnn-cal"><div class="lnn-cal-ring" id="cal-dial">—</div><div class="lnn-cal-txt" id="cal-info"><span class="lnn-placeholder">Draw to see</span></div></div>';
     botR.appendChild(calPanel.el);
-
-    const emPanel = panel('Embedding Space', 'Your input vs class clusters', true);
-    emPanel.el.classList.add('lnn-em-panel');
-    const emWrap = mk('div', 'lnn-cvwrap');
-    const emCv = document.createElement('canvas'); emCv.classList.add('lnn-cv');
-    emWrap.appendChild(emCv); emPanel.body.classList.add('lnn-cv-body');
-    emPanel.body.appendChild(emWrap); botR.appendChild(emPanel.el);
 
     // STATE
     let nodeAct = ARCH.map(l => new Array(l.vis || VIS_DEFAULT).fill(0));

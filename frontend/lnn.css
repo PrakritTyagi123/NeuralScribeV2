@@ -47,7 +47,7 @@
     gap: 6px;
 }
 
-/* Bottom row: FMaps+Timeline | LayerDive | Right stack */
+/* Bottom row: FMaps+Timeline | Embedding | Robustness+Cal */
 .lnn-bot {
     display: flex;
     flex: 0 0 35%;
@@ -73,7 +73,7 @@
     overflow: hidden;
 }
 .lnn-col-r {
-    width: 200px;
+    width: 260px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -81,14 +81,14 @@
     overflow: hidden;
 }
 .lnn-bot-l {
-    flex: 3;
+    flex: 2;
     display: flex;
     flex-direction: column;
     gap: 6px;
     min-width: 0;
 }
 .lnn-bot-r {
-    width: 200px;
+    width: 240px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -171,10 +171,9 @@
 .lnn-evo-panel   { flex: 1; min-height: 0; }
 .lnn-fm-panel    { flex: 3; }
 .lnn-st-panel    { flex: 2; }
-.lnn-ld-panel    { flex: 3; }
 .lnn-rb-panel    { flex-shrink: 0; }
 .lnn-cal-panel   { flex-shrink: 0; }
-.lnn-em-panel    { flex: 1; min-height: 0; }
+.lnn-em-panel    { flex: 2; min-height: 0; }
 
 /* ── Draw ── */
 .lnn-draw-body {

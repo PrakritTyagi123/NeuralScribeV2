@@ -12,7 +12,7 @@ export const ARCH = [
     { name: 'Block 2', n: 256, vis: 16, type: 'conv',   key: 'block_2' },
     { name: 'Block 3', n: 320, vis: 18, type: 'conv',   key: 'block_3' },
     { name: 'Pool',    n: 320, vis: 12, type: 'fc',     key: 'pooled' },
-    { name: 'Output',  n: 62,  vis: 5,  type: 'output', key: 'output' },
+    { name: 'Output',  n: 47,  vis: 5,  type: 'output', key: 'output' },
 ];
 
 export const VIS_DEFAULT = 8;

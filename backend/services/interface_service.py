@@ -1,6 +1,6 @@
 """
-NeuralScribe v2 — Interface service (language-aware).
-Handles inference, TTA, and explainability per language.
+Interface service for NeuralScribe v2.
+Handles inference, TTA, explainability, real Grad-CAM, real robustness.
 """
 
 import io
@@ -15,7 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.cm as cm
 from typing import Dict, Any, Optional, List
 
-from ..utils.config import ClassRegistry, ProjectConfig, SUPPORTED_LANGUAGES, get_language_paths
+from ..utils.config import ClassRegistry, PROJECT_ROOT
 from ..utils.logging import get_logger
 from ..ml.model import NeuralScribeNet
 from ..ml.preprocess import preprocess_canvas_data, DEFAULT_MEAN, DEFAULT_STD
@@ -25,48 +25,34 @@ log = get_logger(__name__)
 
 
 class InterfaceService:
-    """Inference and explainability service, per language."""
-
     def __init__(self):
-        self._project_config = ProjectConfig()
-        self._language = self._project_config.selected_language
-        self._registry = ClassRegistry(language=self._language)
+        self._language = "english"
+        self._registry = ClassRegistry(language="english")
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._model: Optional[NeuralScribeNet] = None
         self._tta = TTAAugmentor()
 
-    # ── Language switching ──
-
-    @property
-    def language(self) -> str:
-        return self._language
-
-    def set_language(self, language: str) -> Dict[str, Any]:
-        if language not in SUPPORTED_LANGUAGES:
-            return {"error": f"Unsupported language: {language}"}
-        if language == self._language:
-            return {"status": "already_set", "language": language}
-
+    def set_language(self, language):
         self._language = language
         self._registry = ClassRegistry(language=language)
-        self._model = None  # Must reload model for new language
-
-        self._project_config.set_ui_state("inference_language", language)
-        log.info(f"Interface service switched to language: {language}")
-        return {"status": "switched", "language": language}
+        self._model = None
+        return {"status": "ok"}
+    
+    @property
+    def language(self):
+        return self._language
 
     def set_model(self, model: NeuralScribeNet, registry: ClassRegistry = None):
-        """Set the model for inference."""
         self._model = model
         self._model.eval()
         if registry:
             self._registry = registry
 
-    def clear_model(self) -> None:
+    def clear_model(self):
         self._model = None
 
     @property
-    def model_loaded(self) -> bool:
+    def model_loaded(self):
         return self._model is not None
 
     # ── Prediction ──
@@ -109,7 +95,6 @@ class InterfaceService:
         category_probs = self._group_probabilities_by_category(all_probs)
 
         return {
-            "language": self._language,
             "predicted_class": predicted["class_id"],
             "predicted_label": predicted["display"],
             "confidence": predicted["confidence"],
@@ -119,7 +104,7 @@ class InterfaceService:
             "used_tta": use_tta,
         }
 
-    def _predict_tta(self, tensor: torch.Tensor) -> torch.Tensor:
+    def _predict_tta(self, tensor):
         variants = self._tta.generate_variants(tensor)
         variants = variants.to(self._device)
         with torch.no_grad():
@@ -127,7 +112,7 @@ class InterfaceService:
             probs = F.softmax(logits, dim=-1)
         return probs.mean(dim=0)
 
-    def _group_probabilities_by_category(self, all_probs: np.ndarray) -> Dict[str, List[Dict]]:
+    def _group_probabilities_by_category(self, all_probs):
         grouped = {}
         for cls in self._registry.classes:
             cat = cls["category"]
@@ -144,7 +129,7 @@ class InterfaceService:
             grouped[cat].sort(key=lambda x: x["probability"], reverse=True)
         return grouped
 
-    # ── Explainability ──
+    # ── Full Explainability ──
 
     def explain(self, pixel_data: list) -> Dict[str, Any]:
         if self._model is None:
@@ -192,7 +177,7 @@ class InterfaceService:
             "layers": list(activations.keys()),
         }
 
-    def _compute_probability_evolution(self, tensor: torch.Tensor) -> List[Dict]:
+    def _compute_probability_evolution(self, tensor):
         evolution_raw = self._model.get_probability_evolution(tensor)
         evolution = []
         for step in evolution_raw:
@@ -224,10 +209,8 @@ class InterfaceService:
                 heatmaps.append({"channel": int(ch_idx), "importance": round(importance_val, 4), "heatmap": b64})
                 importance_list.append({"channel": int(ch_idx), "importance": round(importance_val, 4)})
             return {
-                "heatmaps": heatmaps,
-                "importance": importance_list,
-                "total_channels": C,
-                "spatial_size": [int(act.shape[1]), int(act.shape[2])],
+                "heatmaps": heatmaps, "importance": importance_list,
+                "total_channels": C, "spatial_size": [int(act.shape[1]), int(act.shape[2])],
             }
         if act.dim() == 2:
             vec = act.squeeze(0).cpu().numpy()
@@ -243,11 +226,10 @@ class InterfaceService:
         return {
             "heatmaps": [{"channel": 0, "importance": round(importance_val, 4), "heatmap": b64}],
             "importance": [{"channel": 0, "importance": round(importance_val, 4)}],
-            "total_channels": int(vec.shape[0]),
-            "spatial_size": [stripe.shape[0], stripe.shape[1]],
+            "total_channels": int(vec.shape[0]), "spatial_size": [stripe.shape[0], stripe.shape[1]],
         }
 
-    def _array_to_heatmap_base64(self, arr: np.ndarray, size: int = 56) -> str:
+    def _array_to_heatmap_base64(self, arr, size=56):
         vmin, vmax = arr.min(), arr.max()
         normalized = (arr - vmin) / (vmax - vmin) if vmax - vmin > 1e-8 else np.zeros_like(arr)
         colored = cm.viridis(normalized)
@@ -258,7 +240,7 @@ class InterfaceService:
         img.save(buf, format="PNG")
         return base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    def _tensor_to_base64(self, tensor: torch.Tensor, size: int = 112) -> str:
+    def _tensor_to_base64(self, tensor, size=112):
         if tensor.dim() == 3:
             tensor = tensor.squeeze(0)
         arr = (tensor.cpu().numpy() * DEFAULT_STD + DEFAULT_MEAN)
@@ -271,7 +253,7 @@ class InterfaceService:
 
     # ── Layer feature maps on demand ──
 
-    def get_layer_feature_maps(self, pixel_data: list, layer_name: str, max_channels: int = 16) -> Dict[str, Any]:
+    def get_layer_feature_maps(self, pixel_data, layer_name, max_channels=16):
         if self._model is None:
             return {"error": "No model loaded"}
         tensor = preprocess_canvas_data(pixel_data)
@@ -285,6 +267,139 @@ class InterfaceService:
         if act.dim() != 4:
             return {"error": f"Layer {layer_name} is not a conv layer"}
         return {"layer": layer_name, **self._render_feature_maps(act, max_channels)}
+
+    # ══════════════════════════════════════════
+    # REAL GRAD-CAM
+    # ══════════════════════════════════════════
+
+    def compute_gradcam(self, pixel_data: list) -> Dict[str, Any]:
+        """Real Grad-CAM: gradient-weighted class activation mapping."""
+        if self._model is None:
+            return {"error": "No model loaded"}
+
+        activations_store = {}
+        gradients_store = {}
+
+        def fwd_hook(module, inp, out):
+            activations_store['last_conv'] = out.detach()
+
+        def bwd_hook(module, grad_in, grad_out):
+            gradients_store['last_conv'] = grad_out[0].detach()
+
+        # Find the last conv layer (deepest block's conv2 or last Conv2d)
+        target_layer = None
+        for name, module in self._model.named_modules():
+            if hasattr(module, 'weight') and module.weight.dim() == 4:
+                target_layer = module  # keep overwriting — last one wins
+
+        if target_layer is None:
+            return {"error": "No conv layer found for Grad-CAM"}
+
+        h_fwd = target_layer.register_forward_hook(fwd_hook)
+        h_bwd = target_layer.register_full_backward_hook(bwd_hook)
+
+        try:
+            input_tensor = preprocess_canvas_data(pixel_data).to(self._device)
+            input_tensor.requires_grad_(True)
+
+            logits = self._model(input_tensor)
+            pred_class = logits.argmax(dim=1).item()
+
+            # Backward for predicted class
+            self._model.zero_grad()
+            one_hot = torch.zeros_like(logits)
+            one_hot[0, pred_class] = 1.0
+            logits.backward(gradient=one_hot)
+
+            act = activations_store.get('last_conv')
+            grad = gradients_store.get('last_conv')
+
+            if act is None or grad is None:
+                return {"error": "Grad-CAM hooks did not capture data"}
+
+            # Global average pool gradients → channel weights
+            weights = grad.mean(dim=(2, 3), keepdim=True)  # (1, C, 1, 1)
+            cam = (weights * act).sum(dim=1, keepdim=True)  # (1, 1, H, W)
+            cam = F.relu(cam)  # Only positive contributions
+            cam = cam.squeeze().cpu().numpy()
+
+            # Normalize 0-1
+            cam_min, cam_max = cam.min(), cam.max()
+            if cam_max - cam_min > 1e-8:
+                cam = (cam - cam_min) / (cam_max - cam_min)
+            else:
+                cam = np.zeros_like(cam)
+
+            # Resize to 28×28
+            cam_img = Image.fromarray((cam * 255).astype(np.uint8))
+            cam_img = cam_img.resize((28, 28), Image.BICUBIC)
+            cam_28 = np.array(cam_img, dtype=np.float32) / 255.0
+
+            return {
+                "gradcam": cam_28.flatten().tolist(),
+                "predicted_class": pred_class,
+                "display": self._registry.id_to_display(pred_class),
+            }
+        finally:
+            h_fwd.remove()
+            h_bwd.remove()
+            self._model.eval()
+
+    # ══════════════════════════════════════════
+    # REAL ROBUSTNESS (TTA)
+    # ══════════════════════════════════════════
+
+    def compute_robustness(self, pixel_data: list) -> Dict[str, Any]:
+        """Run 5 perturbed versions through inference, measure prediction stability."""
+        if self._model is None:
+            return {"error": "No model loaded"}
+
+        import torchvision.transforms.functional as TF
+
+        tensor = preprocess_canvas_data(pixel_data).to(self._device)
+        self._model.eval()
+
+        perturbations = [
+            ("original", tensor),
+            ("rotate −5°", TF.rotate(tensor, -5)),
+            ("rotate +5°", TF.rotate(tensor, 5)),
+            ("shift right", torch.roll(tensor, 1, dims=3)),
+            ("shift left", torch.roll(tensor, -1, dims=3)),
+        ]
+
+        results = []
+        pred_classes = []
+
+        with torch.no_grad():
+            for name, t in perturbations:
+                logits = self._model(t)
+                probs = F.softmax(logits, dim=-1).squeeze(0)
+                top_prob, top_idx = probs.topk(1)
+                cid = int(top_idx[0])
+                conf = round(float(top_prob[0]), 4)
+                results.append({
+                    "name": name,
+                    "predicted_class": cid,
+                    "display": self._registry.id_to_display(cid),
+                    "confidence": conf,
+                })
+                pred_classes.append(cid)
+
+        # Stability = fraction of perturbations that agree with original
+        original_pred = pred_classes[0]
+        agree_count = sum(1 for c in pred_classes if c == original_pred)
+        stability = round(agree_count / len(pred_classes) * 100)
+
+        # Average confidence across all perturbations
+        avg_conf = round(sum(r["confidence"] for r in results) / len(results), 4)
+
+        return {
+            "stability": stability,
+            "avg_confidence": avg_conf,
+            "original_prediction": results[0]["display"],
+            "perturbations": results,
+            "all_agree": agree_count == len(pred_classes),
+        }
 
     # ── Live explainability ──
 

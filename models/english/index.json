@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "name": "model_english_20260320_201125_epoch_9",
+    "epoch": 9,
+    "val_acc": 0.8429,
+    "timestamp": "20260320_201125",
+    "file": "model_english_20260320_201125_epoch_9.pth",
+    "size": "34.3 MB"
+  }
+]
