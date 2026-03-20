@@ -1,0 +1,11 @@
+{
+  "name": "best_english_20260320_200144",
+  "epoch": 1,
+  "train_loss": 1.182,
+  "val_loss": 0.9211,
+  "val_acc": 0.7935,
+  "n_params": 2989955,
+  "num_classes": 47,
+  "language": "english",
+  "timestamp": "20260320_200144"
+}

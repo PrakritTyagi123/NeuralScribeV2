@@ -3,7 +3,14 @@
     "last_selected_language": "english",
     "last_selected_model": null,
     "languages": {
-        "english": { "enabled": true, "status": "ready", "dataset_prepared": false, "last_model": null }
+        "english": {
+            "enabled": true,
+            "status": "ready",
+            "dataset_prepared": false,
+            "last_model": "best_model"
+        }
     },
-    "ui_state": { "active_view": "intro" }
+    "ui_state": {
+        "active_view": "intro"
+    }
 }
