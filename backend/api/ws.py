@@ -18,22 +18,51 @@ ws_router = APIRouter()
 
 
 class ConnectionManager:
-    """Manages active WebSocket connections."""
+    """Manages active WebSocket connections. Auto-shuts down when all clients leave."""
 
     def __init__(self):
         self._connections: Set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        self._shutdown_task = None
+        self._auto_shutdown = False
+        self._shutdown_delay = 10  # seconds after last client disconnects
+
+    def enable_auto_shutdown(self, delay=10):
+        """Enable auto-shutdown when all clients disconnect. Called by launcher."""
+        self._auto_shutdown = True
+        self._shutdown_delay = delay
+        log.info(f"Auto-shutdown enabled ({delay}s after last client)")
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         async with self._lock:
             self._connections.add(websocket)
+            # Cancel pending shutdown if a client reconnects
+            if self._shutdown_task and not self._shutdown_task.done():
+                self._shutdown_task.cancel()
+                self._shutdown_task = None
+                log.info("Auto-shutdown cancelled — client reconnected")
         log.info(f"WS client connected ({len(self._connections)} total)")
 
     async def disconnect(self, websocket: WebSocket):
         async with self._lock:
             self._connections.discard(websocket)
         log.info(f"WS client disconnected ({len(self._connections)} total)")
+        # Start shutdown countdown if no clients remain
+        if self._auto_shutdown and len(self._connections) == 0:
+            self._shutdown_task = asyncio.create_task(self._auto_shutdown_countdown())
+
+    async def _auto_shutdown_countdown(self):
+        """Wait, then exit if still no clients."""
+        try:
+            log.info(f"No clients connected. Shutting down in {self._shutdown_delay}s...")
+            await asyncio.sleep(self._shutdown_delay)
+            if len(self._connections) == 0:
+                log.info("No clients reconnected. Shutting down server.")
+                import os
+                os._exit(0)
+        except asyncio.CancelledError:
+            pass
 
     async def broadcast(self, data: Dict[str, Any]):
         """Send a message to all connected clients."""

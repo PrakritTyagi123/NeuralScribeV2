@@ -1,6 +1,6 @@
 """
 NeuralScribe v2 — Windows Launcher with Eel
-Opens a native browser window. Runs FastAPI server in a background thread.
+Opens a native browser window. Kills everything when window closes.
 """
 
 import sys
@@ -23,6 +23,8 @@ URL = f"http://{HOST}:{PORT}"
 def start_server():
     import uvicorn
     from backend.api.app import create_app
+    from backend.api.ws import manager
+    manager.enable_auto_shutdown(delay=10)
     app = create_app()
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
 
@@ -37,6 +39,12 @@ def wait_for_server(timeout=30):
         except:
             time.sleep(0.5)
     return False
+
+
+def on_close(page, sockets):
+    """Called when the Eel browser window is closed. Kill everything."""
+    print("\n  Window closed. Shutting down...")
+    os._exit(0)
 
 
 def main():
@@ -61,7 +69,7 @@ def main():
 
     print("  Server ready! Opening window...")
     print()
-    print("  Close this console window to stop NeuralScribe.")
+    print("  Close the browser window to stop NeuralScribe.")
     print("=" * 50)
 
     try:
@@ -82,6 +90,7 @@ def main():
 
         try:
             eel.start('index.html', mode='chrome', port=0,
+                      close_callback=on_close,
                       cmdline_args=[f'--app={URL}', '--disable-extensions',
                                     '--disable-default-apps', '--new-window'],
                       size=(1400, 900))
@@ -91,6 +100,7 @@ def main():
                 if not os.path.exists(edge):
                     edge = r'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
                 eel.start('index.html', mode='custom', port=0,
+                          close_callback=on_close,
                           cmdline_args=[edge, f'--app={URL}',
                                         '--disable-extensions', '--new-window'],
                           size=(1400, 900))
@@ -110,7 +120,8 @@ def _fallback_browser():
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        pass
+        print("\n  Shutting down...")
+        os._exit(0)
 
 
 if __name__ == "__main__":
