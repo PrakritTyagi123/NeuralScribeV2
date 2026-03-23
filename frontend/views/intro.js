@@ -53,7 +53,7 @@ export async function renderIntro(container) {
         </div>
 
         <div style="text-align:center;font-size:12px;color:var(--muted);padding:16px 0;">
-            Created by <strong>Prakrit Tyagi</strong>
+            Created by <strong>Prathamesh Minde</strong>
         </div>
     `;
     container.appendChild(card);
