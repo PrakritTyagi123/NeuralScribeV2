@@ -7,7 +7,7 @@ preprocessing:
     enabled: true
     sigma: 0.5
 augmentation:
-  precompute_factor: 10
+  precompute_factor: 3
   rotation_range:
   - -12
   - 12

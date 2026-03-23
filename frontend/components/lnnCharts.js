@@ -1,10 +1,11 @@
 /**
  * NeuralScribe v2 — LNN Chart Renderers
- * Probability evolution, stroke timeline, and embedding visualization.
+ * Probability evolution and stroke timeline.
+ * Embedding is now in embedding3d.js (Three.js).
  */
 
 // ═══════════════════════════════════════
-// PROBABILITY EVOLUTION (real data — unchanged)
+// PROBABILITY EVOLUTION
 // ═══════════════════════════════════════
 
 export function drawEvo(ctx, wrap, evoHistory) {
@@ -25,7 +26,6 @@ export function drawEvo(ctx, wrap, evoHistory) {
     const pw = w - pad.l - pad.r;
     const ph = h - pad.t - pad.b;
 
-    // Grid lines
     ctx.strokeStyle = '#e4e4e7';
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
@@ -57,7 +57,6 @@ export function drawEvo(ctx, wrap, evoHistory) {
         });
         ctx.stroke();
 
-        // End label
         const last = evoHistory[evoHistory.length - 1];
         if (last && rank < last.length) {
             ctx.fillStyle = colors[rank];
@@ -70,7 +69,7 @@ export function drawEvo(ctx, wrap, evoHistory) {
 }
 
 // ═══════════════════════════════════════
-// STROKE TIMELINE (real data — unchanged)
+// STROKE TIMELINE
 // ═══════════════════════════════════════
 
 export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
@@ -91,7 +90,6 @@ export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
     const pw = w - pad.l - pad.r;
     const ph = h - pad.t - pad.b;
 
-    // Grid
     ctx.strokeStyle = '#e4e4e7';
     ctx.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
@@ -106,7 +104,6 @@ export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
         ctx.fillText(((4 - i) * 25) + '%', pad.l - 4, y + 3);
     }
 
-    // Confidence line
     ctx.strokeStyle = '#2563eb';
     ctx.lineWidth = 1.8;
     ctx.beginPath();
@@ -118,7 +115,6 @@ export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
     });
     ctx.stroke();
 
-    // Stroke event markers
     let prevStroke = 0;
     strokeHistory.forEach((pt, i) => {
         if (pt.stroke > prevStroke) {
@@ -135,7 +131,6 @@ export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
         }
     });
 
-    // End label
     const last = strokeHistory[strokeHistory.length - 1];
     if (last && last.label) {
         const x = pad.l + pw;
@@ -145,98 +140,4 @@ export function drawStrokeTimeline(ctx, wrap, strokeHistory) {
         ctx.textAlign = 'left';
         ctx.fillText(last.label + ' ' + (last.conf * 100).toFixed(0) + '%', x + 4, y + 4);
     }
-}
-
-// ═══════════════════════════════════════
-// EMBEDDING SPACE (confidence-based layout, honestly labeled)
-// ═══════════════════════════════════════
-
-let embeddingCache = null;
-let embeddingPredKey = '';
-
-function buildEmbeddingCache(preds, w, h) {
-    const cx = w / 2, cy = h / 2;
-    const cache = [];
-    preds.slice(0, 5).forEach((pred, i) => {
-        // Position by confidence: winner near center, others spread out proportionally
-        const angle = (i / 5) * Math.PI * 2 - Math.PI / 2;
-        const maxDist = Math.min(w, h) * 0.38;
-        const dist = i === 0 ? 0 : maxDist * (1 - pred.confidence) + maxDist * 0.2;
-        const px = cx + Math.cos(angle) * dist;
-        const py = cy + Math.sin(angle) * dist;
-
-        // Cluster density proportional to confidence
-        const dots = [];
-        const count = Math.max(3, Math.round(pred.confidence * 25));
-        const spread = 8 + (1 - pred.confidence) * 12;
-        for (let d = 0; d < count; d++) {
-            dots.push({
-                x: px + (Math.random() - 0.5) * spread,
-                y: py + (Math.random() - 0.5) * spread,
-            });
-        }
-        cache.push({ pred, px, py, dots, isWinner: i === 0 });
-    });
-    return cache;
-}
-
-export function drawEmbedding(ctx, wrap, outPreds) {
-    const w = wrap.clientWidth;
-    const h = wrap.clientHeight;
-    if (w < 10 || h < 10) return;
-    ctx.clearRect(0, 0, w, h);
-
-    if (outPreds.length === 0) {
-        ctx.fillStyle = '#a1a1aa';
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('No data', w / 2, h / 2);
-        return;
-    }
-
-    // Rebuild cache when predictions change
-    const key = outPreds.map(p => p.display + p.confidence.toFixed(2)).join(',');
-    if (key !== embeddingPredKey || !embeddingCache) {
-        embeddingCache = buildEmbeddingCache(outPreds, w, h);
-        embeddingPredKey = key;
-    }
-
-    // Title
-    ctx.fillStyle = '#a1a1aa';
-    ctx.font = '7px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('Confidence clusters (simplified)', 4, 10);
-
-    // Draw cached dots
-    embeddingCache.forEach(cluster => {
-        cluster.dots.forEach(dot => {
-            ctx.fillStyle = cluster.isWinner ? 'rgba(37,99,235,0.35)' : 'rgba(100,116,139,0.12)';
-            ctx.beginPath();
-            ctx.arc(dot.x, dot.y, 2.2, 0, Math.PI * 2);
-            ctx.fill();
-        });
-        ctx.fillStyle = cluster.isWinner ? '#1e40af' : '#94a3b8';
-        ctx.font = cluster.isWinner ? 'bold 10px monospace' : '9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(cluster.pred.display + ' ' + (cluster.pred.confidence * 100).toFixed(0) + '%',
-                      cluster.px, cluster.py - 12);
-    });
-
-    // Input marker at center
-    const cx = w / 2, cy = h / 2;
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - 5, cy - 5); ctx.lineTo(cx + 5, cy + 5);
-    ctx.moveTo(cx + 5, cy - 5); ctx.lineTo(cx - 5, cy + 5);
-    ctx.stroke();
-    ctx.fillStyle = '#1e40af';
-    ctx.font = 'bold 8px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('INPUT', cx + 8, cy + 3);
-}
-
-export function resetEmbeddingCache() {
-    embeddingCache = null;
-    embeddingPredKey = '';
 }

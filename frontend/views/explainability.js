@@ -4,8 +4,9 @@
 import { createCanvas } from '../components/canvas.js';
 import { createConfidenceBars, updateConfidenceBars } from '../components/confidenceBars.js';
 import { ARCH, VIS_DEFAULT, computePositions, drawNN, applyLiveData } from '../components/nnDiagram.js';
-import { drawEvo, drawStrokeTimeline, drawEmbedding, resetEmbeddingCache } from '../components/lnnCharts.js';
+import { drawEvo, drawStrokeTimeline } from '../components/lnnCharts.js';
 import { drawGradCAM, updateFeatureMaps, updateConfusion, updateRobustness, updateCalibration } from '../components/lnnPanels.js';
+import { initEmbedding3D, resetEmbeddingCache } from '../components/embedding3d.js';
 
 let _af = null, _dead = false;
 
@@ -22,7 +23,6 @@ export async function renderExplainability(container) {
         return;
     }
 
-    // Build DOM
     const hdr = mk('div', 'lnn-hdr');
     hdr.innerHTML = '<span class="lnn-title">Live Neural Network</span><span class="lnn-status" id="ex-status">Draw a letter or digit to begin</span>';
     container.appendChild(hdr);
@@ -95,14 +95,15 @@ export async function renderExplainability(container) {
     stWrap.appendChild(stCv); stPanel.body.classList.add('lnn-cv-body');
     stPanel.body.appendChild(stWrap); botL.appendChild(stPanel.el);
 
-    // BOTTOM CENTER: Embedding Space (was in botR, now larger)
-    const emPanel = panel('Embedding Space', 'Confidence clusters — top-5 predictions');
+    // BOTTOM CENTER: 3D Embedding Space
+    const emPanel = panel('Embedding Space', '3D scatter / radar — drag to rotate');
     emPanel.el.classList.add('lnn-em-panel');
     emPanel.el.style.cssText = 'flex:2;min-height:0;';
-    const emWrap = mk('div', 'lnn-cvwrap');
-    const emCv = document.createElement('canvas'); emCv.classList.add('lnn-cv');
-    emWrap.appendChild(emCv); emPanel.body.classList.add('lnn-cv-body');
-    emPanel.body.appendChild(emWrap); botRow.appendChild(emPanel.el);
+    const emContainer = mk('div', '');
+    emContainer.style.cssText = 'flex:1;min-height:0;display:flex;flex-direction:column;';
+    emPanel.body.style.cssText = 'padding:0;flex:1;display:flex;flex-direction:column;min-height:0;';
+    emPanel.body.appendChild(emContainer);
+    botRow.appendChild(emPanel.el);
 
     // BOTTOM RIGHT: Robustness + Calibration
     const botR = mk('div', 'lnn-bot-r'); botRow.appendChild(botR);
@@ -116,13 +117,20 @@ export async function renderExplainability(container) {
     calPanel.body.innerHTML = '<div class="lnn-cal"><div class="lnn-cal-ring" id="cal-dial">—</div><div class="lnn-cal-txt" id="cal-info"><span class="lnn-placeholder">Draw to see</span></div></div>';
     botR.appendChild(calPanel.el);
 
+    // Init 3D embedding (async — loads Three.js from CDN)
+    let emb3d = null;
+    initEmbedding3D(emContainer).then(inst => { emb3d = inst; }).catch(e => {
+        console.warn('3D embedding init failed:', e);
+        emContainer.innerHTML = '<div class="lnn-placeholder">3D not available</div>';
+    });
+
     // STATE
     let nodeAct = ARCH.map(l => new Array(l.vis || VIS_DEFAULT).fill(0));
     let outPreds = [], winIdx = -1, evoHistory = [], strokeHistory = [];
     let lastFull = 0, pending = false, dirty = false, sysText = '';
     let strokeCount = 0, lastStrokeTime = 0;
     const nnCtx = nnCv.getContext('2d'), evoCtx = evoCv.getContext('2d');
-    const stCtx = stCv.getContext('2d'), emCtx = emCv.getContext('2d');
+    const stCtx = stCv.getContext('2d');
     let sysTimer = null, layerPos = [], debounceTimer = null;
 
     canvasObj.onChange(() => {
@@ -138,7 +146,7 @@ export async function renderExplainability(container) {
     function reset() {
         nodeAct = ARCH.map(l => new Array(l.vis || VIS_DEFAULT).fill(0));
         outPreds = []; winIdx = -1; evoHistory = []; strokeHistory = []; strokeCount = 0;
-        resetEmbeddingCache();
+        if (emb3d) emb3d.reset();
         bigPred.textContent = '?'; confTxt.textContent = '—';
         updateConfidenceBars(barsEl, []);
         ['fmap-body','cn-body','tta-grid'].forEach(id => {
@@ -155,7 +163,7 @@ export async function renderExplainability(container) {
 
     function resize() {
         const dpr = window.devicePixelRatio || 1;
-        [nnWrap, evoWrap, stWrap, emWrap].forEach(w => {
+        [nnWrap, evoWrap, stWrap].forEach(w => {
             const cv = w.querySelector('canvas');
             if (!cv) return;
             const ww = w.clientWidth, hh = w.clientHeight;
@@ -168,7 +176,7 @@ export async function renderExplainability(container) {
     }
 
     const ro = new ResizeObserver(resize);
-    [nnWrap, evoWrap, stWrap, emWrap].forEach(w => ro.observe(w));
+    [nnWrap, evoWrap, stWrap].forEach(w => ro.observe(w));
     setTimeout(resize, 120);
 
     async function pollSys() {
@@ -193,7 +201,12 @@ export async function renderExplainability(container) {
             const result = applyLiveData(live, nodeAct, layerPos);
             outPreds = result.outPreds; winIdx = result.winIdx;
             const preds = live.predictions || [];
-            updateConfidenceBars(barsEl, preds); updateConfusion(preds); updateRobustness(preds); updateCalibration(preds); drawGradCAM(pixels);
+            updateConfidenceBars(barsEl, preds);
+            updateConfusion(preds);
+            updateRobustness(preds);
+            updateCalibration(preds);
+            drawGradCAM(pixels);
+            if (emb3d) emb3d.update(preds);
             const top = preds[0];
             if (top) { bigPred.textContent = top.display; confTxt.textContent = (top.confidence*100).toFixed(1)+'% confidence'; }
             evoHistory.push(preds); if (evoHistory.length > 60) evoHistory.shift();
@@ -223,7 +236,6 @@ export async function renderExplainability(container) {
         drawNN(nnCtx, nnWrap.clientWidth, nnWrap.clientHeight, layerPos, outPreds, winIdx);
         drawEvo(evoCtx, evoWrap, evoHistory);
         drawStrokeTimeline(stCtx, stWrap, strokeHistory);
-        drawEmbedding(emCtx, emWrap, outPreds);
         _af = requestAnimationFrame(animate);
     }
     animate();

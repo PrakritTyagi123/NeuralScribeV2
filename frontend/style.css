@@ -115,9 +115,17 @@ body {
 }
 
 .nav-icon {
-    font-size: 14px;
-    width: 18px;
-    text-align: center;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.nav-icon svg {
+    display: block;
+    width: 16px;
+    height: 16px;
 }
 
 #main {

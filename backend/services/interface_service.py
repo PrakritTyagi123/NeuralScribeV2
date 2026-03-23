@@ -37,7 +37,7 @@ class InterfaceService:
         self._registry = ClassRegistry(language=language)
         self._model = None
         return {"status": "ok"}
-    
+
     @property
     def language(self):
         return self._language
