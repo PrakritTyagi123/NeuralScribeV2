@@ -181,6 +181,11 @@ class TrainingService:
         self._stop_requested = True
 
     def get_status(self) -> Dict[str, Any]:
+        if not self._history:
+            self._history = self._load_training_history()
+        if self._history and self._best_val_acc == 0:
+            self._best_val_acc = max((h.get("val_acc", 0) for h in self._history), default=0)
+            self._current_epoch = max((h.get("epoch", 0) for h in self._history), default=0)
         return {
             "language": self._language,
             "is_training": self._is_training,
@@ -188,7 +193,7 @@ class TrainingService:
             "current_epoch": self._current_epoch,
             "best_val_acc": round(self._best_val_acc, 4),
             "device": str(self._device),
-            "history": self._history[-20:],
+            "history": self._history,
             "state": self._training_state,
         }
 

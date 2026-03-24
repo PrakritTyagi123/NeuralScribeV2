@@ -1,7 +1,7 @@
 /**
  * NeuralScribe v2 — Data Preparation
  * Reads EMNIST directly, preprocesses, augments, caches.
- * User configures: augmentation factor.
+ * Shows completed state when cache already exists.
  */
 import { createProgressBar, updateProgressBar } from '../components/progressBar.js';
 import { createLogConsole, appendLog } from '../components/logConsole.js';
@@ -126,7 +126,12 @@ export async function renderDataPrep(container) {
         const st = await (await fetch('/api/dataset/status')).json();
         if (st.cache_exists) {
             infoEl.textContent = `English — 47 classes — Cache: ${st.cache_size}`;
-            appendLog(logConsole, `Cache exists: ${st.cache_size} (${st.num_classes} classes). Re-run to rebuild.`);
+            appendLog(logConsole, `✓ Dataset already prepared and cached.`);
+            appendLog(logConsole, `  Cache size: ${st.cache_size} (${st.num_classes} classes)`);
+            appendLog(logConsole, `  Path: ${st.cache_path}`);
+            appendLog(logConsole, `  Click Start to rebuild if needed.`);
+            // Show all bars as complete
+            Object.values(bars).forEach(b => updateProgressBar(b, 100, 'Complete'));
         } else if (st.emnist_downloaded) {
             infoEl.textContent = 'English — 47 classes — EMNIST downloaded, ready to prepare';
             appendLog(logConsole, 'EMNIST downloaded. Click Start to preprocess and cache.');

@@ -1,13 +1,13 @@
 {
     "version": 2,
     "last_selected_language": "english",
-    "last_selected_model": null,
+    "last_selected_model": "best_model",
     "languages": {
         "english": {
             "enabled": true,
             "status": "ready",
-            "dataset_prepared": false,
-            "last_model": null
+            "dataset_prepared": true,
+            "last_model": "best_model"
         }
     },
     "ui_state": {
